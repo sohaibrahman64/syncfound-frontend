@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "strict": false,
+    "jsx": "react-native",
+    "moduleResolution": "bundler",
+    "allowJs": true,
+    "checkJs": false,
+    "noEmit": true
+  },
+  "exclude": [
+    "node_modules"
+  ],
+  "extends": "expo/tsconfig.base"
+}

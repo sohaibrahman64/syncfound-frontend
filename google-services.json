@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "527982762549",
+    "project_id": "syncfound-fe04d",
+    "storage_bucket": "syncfound-fe04d.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:527982762549:android:d9121b06a88622575b2f7c",
+        "android_client_info": {
+          "package_name": "com.sohaibrahman64.syncfoundmobilefrontend"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAtrTEwqjIighvLEDMMJ5OeF3OpEAGMlTM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
