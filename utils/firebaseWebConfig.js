@@ -1,5 +1,5 @@
 const firebaseWebConfig = {
-  apiKey: 'AIzaSyBR-uBstEV2MzTGrQ7uvhLeOk0F-mebsxQ',
+  apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY,
   authDomain: 'syncfound-fe04d.firebaseapp.com',
   projectId: 'syncfound-fe04d',
   storageBucket: 'syncfound-fe04d.firebasestorage.app',
