@@ -13,7 +13,7 @@ import { getIndustries } from '../utils/backendAuth';
 import { useResponsiveMetrics } from '../utils/responsive';
 import { withPlatformFontStyles } from '../utils/typography';
 
-const MAX_SELECTION = 7;
+const MAX_SELECTION = 1;
 
 function toIndustryModel(item) {
   const id = item?.id;

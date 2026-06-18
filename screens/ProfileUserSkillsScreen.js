@@ -80,8 +80,8 @@ export default function ProfileUserSkillsScreen({ onBack, onContinue, initialUse
         return prev.filter((skill) => skill !== value);
       }
 
-      if (prev.length >= 7) {
-        setSelectionMessage('Sorry. You can select upto 7 skills');
+      if (prev.length >= 5) {
+        setSelectionMessage('Sorry. You can select upto 5 skills');
         return prev;
       }
 

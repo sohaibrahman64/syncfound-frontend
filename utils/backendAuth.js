@@ -1,12 +1,14 @@
 const API_BASE_URL =
   process.env.EXPO_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
 const FIREBASE_LOGIN_PATH = "/auth/firebase-login";
+const FIREBASE_SIGNIN_PATH = "/auth/firebase-signin";
 const USER_EMAIL_UPDATE_PATH = "/users/me/email";
 const USER_PROFILE_PATH =
   process.env.EXPO_PUBLIC_USER_PROFILE_PATH || "/users/me/profile";
 const LINKEDIN_INGEST_PATH =
   process.env.EXPO_PUBLIC_LINKEDIN_INGEST_PATH || "/linkedin-profile/ingest";
 const INDUSTRIES_PATH = process.env.EXPO_PUBLIC_INDUSTRIES_PATH || "/industries";
+const USER_MATCHES_PATH = process.env.EXPO_PUBLIC_USER_MATCHES_PATH || "/users/me/matches";
 const IMAGE_UPLOAD_PATH = process.env.EXPO_PUBLIC_IMAGE_UPLOAD_PATH || "/images/upload";
 const IMAGE_REMOVE_PATH = process.env.EXPO_PUBLIC_IMAGE_REMOVE_PATH || "/images/remove";
 
@@ -249,6 +251,94 @@ export async function getIndustries(firebaseToken = "") {
   return [];
 }
 
+function normalizeMatchesPayload(payload) {
+  if (Array.isArray(payload)) {
+    return {
+      items: payload,
+      nextCursor: null,
+    };
+  }
+
+  if (Array.isArray(payload?.items)) {
+    return {
+      items: payload.items,
+      nextCursor: payload?.next_cursor ?? payload?.nextCursor ?? null,
+    };
+  }
+
+  if (Array.isArray(payload?.data)) {
+    return {
+      items: payload.data,
+      nextCursor: payload?.next_cursor ?? payload?.nextCursor ?? null,
+    };
+  }
+
+  if (payload && typeof payload === 'object' && payload?.candidate_id != null) {
+    return {
+      items: [payload],
+      nextCursor: payload?.next_cursor ?? payload?.nextCursor ?? null,
+    };
+  }
+
+  return {
+    items: [],
+    nextCursor: payload?.next_cursor ?? payload?.nextCursor ?? null,
+  };
+}
+
+export async function getMyMatches({
+  firebaseToken,
+  mode = 'matchmaking',
+  limit = 20,
+  cursor = null,
+  refresh = false,
+} = {}) {
+  const headers = {
+    'Content-Type': 'application/json',
+  };
+
+  if (firebaseToken) {
+    headers.Authorization = `Bearer ${firebaseToken}`;
+  }
+
+  const queryParams = new URLSearchParams();
+  queryParams.set('mode', mode === 'discover' ? 'discover' : 'matchmaking');
+  queryParams.set('limit', String(Math.min(Math.max(Number(limit) || 20, 1), 100)));
+
+  if (cursor) {
+    queryParams.set('cursor', String(cursor));
+  }
+
+  if (refresh) {
+    queryParams.set('refresh', 'true');
+  }
+
+  const response = await fetch(`${API_BASE_URL}${USER_MATCHES_PATH}?${queryParams.toString()}`, {
+    method: 'GET',
+    headers,
+  });
+
+  let payload = null;
+  try {
+    payload = await response.json();
+  } catch {
+    payload = null;
+  }
+
+  if (!response.ok) {
+    const error = new Error(
+      payload?.detail ||
+        payload?.message ||
+        `Failed to load matches with status ${response.status}`,
+    );
+    error.status = response.status;
+    error.payload = payload;
+    throw error;
+  }
+
+  return normalizeMatchesPayload(payload);
+}
+
 export async function uploadProfileImage(imageUri, firebaseToken) {
   const normalizedUri = String(imageUri || "").trim();
 
@@ -354,6 +444,43 @@ export async function removeProfileImage(imageUrl, firebaseToken) {
         payload?.message ||
         `Image removal failed with status ${response.status}`,
     );
+  }
+
+  return payload;
+}
+
+/**
+ * Sign in an existing user via Firebase idToken.
+ * Calls /auth/firebase-signin — only succeeds if the user already exists.
+ */
+export async function signInWithFirebaseToken(idToken, phone_number) {
+  const response = await fetch(`${API_BASE_URL}${FIREBASE_SIGNIN_PATH}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      firebaseToken: idToken,
+      idToken,
+      phone_number,
+    }),
+  });
+
+  let payload = null;
+  try {
+    payload = await response.json();
+  } catch {
+    payload = null;
+  }
+
+  if (!response.ok) {
+    const err = new Error(
+      payload?.detail ||
+        payload?.message ||
+        `Sign in failed with status ${response.status}`,
+    );
+    err.status = response.status;
+    throw err;
   }
 
   return payload;

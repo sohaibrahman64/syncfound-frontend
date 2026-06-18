@@ -1,6 +1,6 @@
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
-import { Platform, Text, TextInput, View } from 'react-native';
+import { Alert, Platform, Text, TextInput, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   PlusJakartaSans_400Regular,
@@ -10,7 +10,7 @@ import {
   useFonts,
 } from '@expo-google-fonts/plus-jakarta-sans';
 import { sendOtp } from './utils/firebaseAuth';
-import { sendFirebaseIdTokenToBackend, updateUserEmailInBackend } from './utils/backendAuth';
+import { sendFirebaseIdTokenToBackend, signInWithFirebaseToken, updateUserEmailInBackend } from './utils/backendAuth';
 import SyncFoundSplashScreen from './screens/SyncFoundSplashScreen';
 import PhoneNumberScreen from './screens/PhoneNumberScreen';
 import CountryPickerScreen from './screens/CountryPickerScreen';
@@ -18,10 +18,13 @@ import OtpScreen from './screens/OtpScreen';
 import EmailScreen from './screens/EmailScreen';
 import CofoundersIntroScreen from './screens/CofoundersIntroScreen';
 import ProfileWizardScreen from './screens/ProfileWizardScreen';
+import HomeScreen from './screens/HomeScreen';
 import { ProfileWizardProvider } from './context/ProfileWizardContext';
 import { getPlatformBaseFontFamily } from './utils/typography';
 
 let hasAppliedGlobalPlatformFontDefaults = false;
+const SESSION_STORAGE_KEY = '@syncfound/session';
+const PROFILE_COMPLETE_STORAGE_KEY = '@syncfound/profile_complete';
 
 function applyGlobalPlatformFontDefaults() {
   if (hasAppliedGlobalPlatformFontDefaults) {
@@ -45,6 +48,7 @@ function applyGlobalPlatformFontDefaults() {
 
 export default function App() {
   const [currentScreen, setCurrentScreen] = useState('splash');
+  const [authMode, setAuthMode] = useState('signup');
   const [selectedCountry, setSelectedCountry] = useState({
     code: 'US',
     iso3: 'USA',
@@ -79,17 +83,40 @@ export default function App() {
   useEffect(() => {
     if (!fontsLoaded) return;
 
-    AsyncStorage.getItem('@syncfound/profile_wizard')
-      .then((raw) => {
-        if (!raw) return;
+    Promise.all([
+      AsyncStorage.getItem('@syncfound/profile_wizard'),
+      AsyncStorage.getItem(SESSION_STORAGE_KEY),
+      AsyncStorage.getItem(PROFILE_COMPLETE_STORAGE_KEY),
+    ])
+      .then(([wizardRaw, sessionRaw, profileCompleteRaw]) => {
+        let restoredToken = '';
+        if (sessionRaw) {
+          try {
+            const session = JSON.parse(sessionRaw);
+            restoredToken = String(session?.firebaseToken || '').trim();
+          } catch {
+            restoredToken = '';
+          }
+        }
+
+        if (restoredToken) {
+          setFirebaseToken(restoredToken);
+        }
+
+        const isProfileComplete = profileCompleteRaw === 'true';
+        if (isProfileComplete && restoredToken) {
+          setCurrentScreen('home');
+          return;
+        }
+
+        if (!wizardRaw) return;
         try {
-          const saved = JSON.parse(raw);
+          const saved = JSON.parse(wizardRaw);
           // Only auto-resume if they had actually started (stepIndex > 0 or draft not empty)
           const hasProgress =
             (saved.stepIndex != null && saved.stepIndex > 0) ||
             (saved.draft && Object.keys(saved.draft).length > 0);
           if (hasProgress) {
-            setFirebaseToken(saved.firebaseToken ?? '');
             setCurrentScreen('profileWizard');
           }
         } catch {
@@ -118,6 +145,7 @@ export default function App() {
           phoneNumber={phoneNumber}
           isSubmitting={isSendingOtp}
           onPhoneNumberChange={setPhoneNumber}
+          onBack={() => setCurrentScreen('splash')}
           onOpenCountryPicker={() => setCurrentScreen('countryPicker')}
           onContinue={async (phoneData) => {
             const fullPhone = `${phoneData.dialCode}${phoneData.phoneNumber}`;
@@ -151,17 +179,55 @@ export default function App() {
               console.log('Resend OTP:', otpPhoneDisplay);
             }}
             onContinue={async ({ otpCode, idToken, phoneNumber: verifiedPhoneNumber }) => {
-              try {
-                const backendResponse = await sendFirebaseIdTokenToBackend(idToken, verifiedPhoneNumber || otpPhoneDisplay);
-                console.log('FastAPI token handoff success:', backendResponse);
-                console.log('Verified phone:', verifiedPhoneNumber);
-                setVerifiedPhoneNumber(verifiedPhoneNumber || otpPhoneDisplay);
-                setFirebaseToken(idToken);
-                setBackendUserId(backendResponse?.user?.id ?? null);
-                setEmailUpdateError('');
-                setCurrentScreen('email');
-              } catch (error) {
-                console.error('Failed to send Firebase idToken to backend:', error);
+              if (authMode === 'signin') {
+                try {
+                  const backendResponse = await signInWithFirebaseToken(idToken, verifiedPhoneNumber || otpPhoneDisplay);
+                  console.log('Sign in success:', backendResponse);
+                  setVerifiedPhoneNumber(verifiedPhoneNumber || otpPhoneDisplay);
+                  setFirebaseToken(idToken);
+                  setBackendUserId(backendResponse?.user?.id ?? null);
+                  AsyncStorage.setItem(
+                    SESSION_STORAGE_KEY,
+                    JSON.stringify({
+                      firebaseToken: idToken,
+                      userId: backendResponse?.user?.id ?? null,
+                    }),
+                  ).catch(() => {});
+                  await AsyncStorage.setItem(PROFILE_COMPLETE_STORAGE_KEY, 'true').catch(() => {});
+                  setCurrentScreen('home');
+                } catch (error) {
+                  console.error('Sign in failed:', error);
+                  const isNotFound =
+                    error?.status === 404 ||
+                    /not found|does not exist|no user/i.test(String(error?.message || ''));
+                  Alert.alert(
+                    'Sign In Failed',
+                    isNotFound
+                      ? 'User not found or does not exist.'
+                      : (error?.message || 'Sign in failed. Please try again.'),
+                    [{ text: 'OK', onPress: () => setCurrentScreen('splash') }],
+                  );
+                }
+              } else {
+                try {
+                  const backendResponse = await sendFirebaseIdTokenToBackend(idToken, verifiedPhoneNumber || otpPhoneDisplay);
+                  console.log('FastAPI token handoff success:', backendResponse);
+                  console.log('Verified phone:', verifiedPhoneNumber);
+                  setVerifiedPhoneNumber(verifiedPhoneNumber || otpPhoneDisplay);
+                  setFirebaseToken(idToken);
+                  setBackendUserId(backendResponse?.user?.id ?? null);
+                  AsyncStorage.setItem(
+                    SESSION_STORAGE_KEY,
+                    JSON.stringify({
+                      firebaseToken: idToken,
+                      userId: backendResponse?.user?.id ?? null,
+                    }),
+                  ).catch(() => {});
+                  setEmailUpdateError('');
+                  setCurrentScreen('email');
+                } catch (error) {
+                  console.error('Failed to send Firebase idToken to backend:', error);
+                }
               }
             }}
           />
@@ -231,12 +297,21 @@ export default function App() {
             backendUserId={backendUserId}
             selectedCountry={selectedCountry}
             onBack={() => setCurrentScreen('cofoundersIntro')}
-            onComplete={() => {
-              // TODO: navigate to the main app home screen once it exists
-              console.log('Profile wizard complete — navigate to home');
+            onComplete={async () => {
+              await AsyncStorage.setItem(PROFILE_COMPLETE_STORAGE_KEY, 'true').catch(() => {});
+              setCurrentScreen('home');
             }}
           />
         </ProfileWizardProvider>
+        <StatusBar style="dark" />
+      </>
+    );
+  }
+
+  if (currentScreen === 'home') {
+    return (
+      <>
+        <HomeScreen firebaseToken={firebaseToken} />
         <StatusBar style="dark" />
       </>
     );
@@ -262,8 +337,8 @@ export default function App() {
         backgroundSource={require('./assets/splash_screen_bg_image.png')}
         logoSource={require('./assets/splash_screen_syncfound_image_logo_green.png')}
         wordmarkSource={require('./assets/syncfound_text_logo_white.png')}
-        onCreateAccount={() => setCurrentScreen('phoneNumber')}
-        onSignIn={() => {}}
+        onCreateAccount={() => { setAuthMode('signup'); setCurrentScreen('phoneNumber'); }}
+        onSignIn={() => { setAuthMode('signin'); setCurrentScreen('phoneNumber'); }}
       />
       <StatusBar style="light" />
     </>
