@@ -12,6 +12,7 @@ import {
   View,
 } from 'react-native';
 import { getMyMatches } from '../utils/backendAuth';
+import { getCurrentFirebaseIdToken } from '../utils/firebaseAuth';
 import { FLAG_ASSET_MAP } from '../utils/flagAssetMap';
 import { useResponsiveMetrics } from '../utils/responsive';
 import { withPlatformFontStyles } from '../utils/typography';
@@ -227,7 +228,7 @@ function MatchCard({ card, styles }) {
   );
 }
 
-export default function HomeScreen({ firebaseToken = '' }) {
+export default function HomeScreen({ firebaseToken = '', onAuthExpired }) {
   const metrics = useResponsiveMetrics();
   const styles = useMemo(() => createStyles(metrics), [metrics]);
   const swipePosition = useRef(new Animated.ValueXY()).current;
@@ -248,14 +249,6 @@ export default function HomeScreen({ firebaseToken = '' }) {
 
   const loadMatches = useCallback(
     async ({ requestedMode = mode, cursor = null, refresh = false, append = false } = {}) => {
-      if (!firebaseToken) {
-        setCards([]);
-        setNextCursor(null);
-        setErrorMessage('You are signed out. Please login again.');
-        setIsInitialLoading(false);
-        return;
-      }
-
       if (append) {
         setIsPaging(true);
       } else {
@@ -269,6 +262,7 @@ export default function HomeScreen({ firebaseToken = '' }) {
       try {
         const payload = await getMyMatches({
           firebaseToken,
+          getFirebaseToken: (forceRefresh) => getCurrentFirebaseIdToken(forceRefresh),
           mode: requestedMode,
           limit: PAGE_LIMIT,
           cursor,
@@ -290,13 +284,23 @@ export default function HomeScreen({ firebaseToken = '' }) {
           setActiveIndex(0);
         }
       } catch (error) {
+        const isAuthError =
+          error?.status === 401 ||
+          error?.code === 'no_current_user' ||
+          /invalid firebase token|unauthori[sz]ed|token/i.test(String(error?.message || ''));
+
+        if (isAuthError) {
+          onAuthExpired?.();
+          return;
+        }
+
         setErrorMessage(error?.message || 'Could not load matches. Please try again.');
       } finally {
         setIsInitialLoading(false);
         setIsPaging(false);
       }
     },
-    [firebaseToken, mode],
+    [firebaseToken, mode, onAuthExpired],
   );
 
   useEffect(() => {

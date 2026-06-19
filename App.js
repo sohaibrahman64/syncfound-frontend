@@ -9,7 +9,7 @@ import {
   PlusJakartaSans_700Bold,
   useFonts,
 } from '@expo-google-fonts/plus-jakarta-sans';
-import { sendOtp } from './utils/firebaseAuth';
+import { sendOtp, signOutFirebaseSession } from './utils/firebaseAuth';
 import { sendFirebaseIdTokenToBackend, signInWithFirebaseToken, updateUserEmailInBackend } from './utils/backendAuth';
 import SyncFoundSplashScreen from './screens/SyncFoundSplashScreen';
 import PhoneNumberScreen from './screens/PhoneNumberScreen';
@@ -65,6 +65,19 @@ export default function App() {
   const [backendUserId, setBackendUserId] = useState(null);
   const [isUpdatingEmail, setIsUpdatingEmail] = useState(false);
   const [emailUpdateError, setEmailUpdateError] = useState('');
+
+  async function handleAuthExpired() {
+    await signOutFirebaseSession().catch(() => {});
+    await Promise.all([
+      AsyncStorage.removeItem(SESSION_STORAGE_KEY),
+      AsyncStorage.removeItem(PROFILE_COMPLETE_STORAGE_KEY),
+    ]).catch(() => {});
+
+    setFirebaseToken('');
+    setBackendUserId(null);
+    setVerifiedPhoneNumber('');
+    setCurrentScreen('splash');
+  }
 
   const [fontsLoaded] = useFonts({
     PlusJakartaSans_400Regular,
@@ -311,7 +324,7 @@ export default function App() {
   if (currentScreen === 'home') {
     return (
       <>
-        <HomeScreen firebaseToken={firebaseToken} />
+        <HomeScreen firebaseToken={firebaseToken} onAuthExpired={handleAuthExpired} />
         <StatusBar style="dark" />
       </>
     );

@@ -1,7 +1,7 @@
 // Web implementation — used by Expo Web (webpack/Metro web target).
 // @react-native-firebase/auth is NOT imported here so it never enters the web bundle.
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getAuth, signInWithPhoneNumber, RecaptchaVerifier } from 'firebase/auth';
+import { getAuth, signInWithPhoneNumber, RecaptchaVerifier, signOut } from 'firebase/auth';
 import firebaseWebConfig from './firebaseWebConfig';
 
 let webAuth = null;
@@ -39,4 +39,22 @@ export async function sendOtp(phoneNumber, containerId = 'recaptcha-container') 
     confirm: (code) => result.confirm(code),
     verificationId: result.verificationId,
   };
+}
+
+export async function getCurrentFirebaseIdToken(forceRefresh = false) {
+  const auth = getWebAuth();
+  const user = auth.currentUser;
+
+  if (!user) {
+    const error = new Error('No active Firebase user session.');
+    error.code = 'no_current_user';
+    throw error;
+  }
+
+  return user.getIdToken(Boolean(forceRefresh));
+}
+
+export async function signOutFirebaseSession() {
+  const auth = getWebAuth();
+  await signOut(auth);
 }

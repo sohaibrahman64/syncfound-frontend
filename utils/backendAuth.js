@@ -288,19 +288,12 @@ function normalizeMatchesPayload(payload) {
 
 export async function getMyMatches({
   firebaseToken,
+  getFirebaseToken,
   mode = 'matchmaking',
   limit = 20,
   cursor = null,
   refresh = false,
 } = {}) {
-  const headers = {
-    'Content-Type': 'application/json',
-  };
-
-  if (firebaseToken) {
-    headers.Authorization = `Bearer ${firebaseToken}`;
-  }
-
   const queryParams = new URLSearchParams();
   queryParams.set('mode', mode === 'discover' ? 'discover' : 'matchmaking');
   queryParams.set('limit', String(Math.min(Math.max(Number(limit) || 20, 1), 100)));
@@ -313,16 +306,41 @@ export async function getMyMatches({
     queryParams.set('refresh', 'true');
   }
 
-  const response = await fetch(`${API_BASE_URL}${USER_MATCHES_PATH}?${queryParams.toString()}`, {
-    method: 'GET',
-    headers,
-  });
+  async function requestMatches(token) {
+    const headers = {
+      'Content-Type': 'application/json',
+    };
 
-  let payload = null;
-  try {
-    payload = await response.json();
-  } catch {
-    payload = null;
+    if (token) {
+      headers.Authorization = `Bearer ${token}`;
+    }
+
+    const response = await fetch(`${API_BASE_URL}${USER_MATCHES_PATH}?${queryParams.toString()}`, {
+      method: 'GET',
+      headers,
+    });
+
+    let payload = null;
+    try {
+      payload = await response.json();
+    } catch {
+      payload = null;
+    }
+
+    return { response, payload };
+  }
+
+  let token = firebaseToken || '';
+
+  if (typeof getFirebaseToken === 'function') {
+    token = await getFirebaseToken(false);
+  }
+
+  let { response, payload } = await requestMatches(token);
+
+  if (response.status === 401 && typeof getFirebaseToken === 'function') {
+    const refreshedToken = await getFirebaseToken(true);
+    ({ response, payload } = await requestMatches(refreshedToken));
   }
 
   if (!response.ok) {

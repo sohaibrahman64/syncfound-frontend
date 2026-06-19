@@ -10,3 +10,19 @@ import auth from '@react-native-firebase/auth';
 export async function sendOtp(phoneNumber) {
   return auth().signInWithPhoneNumber(phoneNumber);
 }
+
+export async function getCurrentFirebaseIdToken(forceRefresh = false) {
+  const user = auth().currentUser;
+
+  if (!user) {
+    const error = new Error('No active Firebase user session.');
+    error.code = 'no_current_user';
+    throw error;
+  }
+
+  return user.getIdToken(Boolean(forceRefresh));
+}
+
+export async function signOutFirebaseSession() {
+  await auth().signOut();
+}
