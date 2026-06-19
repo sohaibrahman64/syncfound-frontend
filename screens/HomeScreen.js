@@ -86,7 +86,14 @@ function dedupeByCandidateId(items) {
 
 function MatchCard({ card, styles }) {
   const flagSource = resolveFlagSource(card.countryCode);
-  const primaryExperience = card.linkedinExperiences?.[0] || null;
+  const experiences = Array.isArray(card.linkedinExperiences)
+    ? card.linkedinExperiences.filter(Boolean)
+    : [];
+  const hasExperienceSection =
+    experiences.length > 0 ||
+    card.linkedinCurrentCompany ||
+    card.linkedinHeadline ||
+    card.experienceSummary;
 
   return (
     <ScrollView
@@ -159,29 +166,61 @@ function MatchCard({ card, styles }) {
         </View>
       )}
 
-      {(primaryExperience || card.linkedinCurrentCompany || card.linkedinHeadline || card.experienceSummary) && (
+      {hasExperienceSection && (
         <View style={styles.sectionCard}>
           <Text style={styles.sectionTitle}>Experience</Text>
-          <View style={styles.experienceRow}>
-            <Image source={require('../assets/internship_green.png')} style={styles.experienceIcon} />
-            <View style={styles.experienceCopy}>
-              {!!(primaryExperience?.company_name || card.linkedinCurrentCompany) && (
-                <Text style={styles.experienceCompany}>
-                  {primaryExperience?.company_name || card.linkedinCurrentCompany}
-                </Text>
-              )}
-              {!!(primaryExperience?.title || card.linkedinHeadline) && (
-                <Text style={styles.experienceRole}>
-                  {primaryExperience?.title || card.linkedinHeadline}
-                </Text>
-              )}
-              {!!(primaryExperience?.date_range || card.experienceSummary) && (
-                <Text style={styles.experienceDate}>
-                  {primaryExperience?.date_range || card.experienceSummary}
-                </Text>
-              )}
+          {experiences.length > 0 ? (
+            experiences.map((experience, index) => (
+              <View
+                key={`${experience?.company || experience?.company_name || 'company'}-${experience?.title || 'title'}-${index}`}
+                style={[
+                  styles.experienceRow,
+                  index > 0 && styles.experienceRowSpaced,
+                  index < experiences.length - 1 && styles.experienceRowWithDivider,
+                ]}
+              >
+                <Image source={require('../assets/internship_green.png')} style={styles.experienceIcon} />
+                <View style={styles.experienceCopy}>
+                  {!!(experience?.company_name || experience?.company) && (
+                    <Text style={styles.experienceCompany}>
+                      {experience?.company_name || experience?.company}
+                    </Text>
+                  )}
+                  {!!experience?.title && (
+                    <Text style={styles.experienceRole}>
+                      {experience.title}
+                    </Text>
+                  )}
+                  {!!(experience?.duration || experience?.date_range) && (
+                    <Text style={styles.experienceDate}>
+                      {experience?.duration || experience?.date_range}
+                    </Text>
+                  )}
+                </View>
+              </View>
+            ))
+          ) : (
+            <View style={styles.experienceRow}>
+              <Image source={require('../assets/internship_green.png')} style={styles.experienceIcon} />
+              <View style={styles.experienceCopy}>
+                {!!card.linkedinCurrentCompany && (
+                  <Text style={styles.experienceCompany}>
+                    {card.linkedinCurrentCompany}
+                  </Text>
+                )}
+                {!!card.linkedinHeadline && (
+                  <Text style={styles.experienceRole}>
+                    {card.linkedinHeadline}
+                  </Text>
+                )}
+                {!!card.experienceSummary && (
+                  <Text style={styles.experienceDate}>
+                    {card.experienceSummary}
+                  </Text>
+                )}
+              </View>
             </View>
-          </View>
+          )}
         </View>
       )}
     </ScrollView>
@@ -607,13 +646,19 @@ function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }) 
     nameText: {
       marginTop: vh(1.2),
       color: '#161616',
-      fontSize: responsiveFont(isShortScreen ? 34 : 37, 28, 40),
-      lineHeight: responsiveFont(isShortScreen ? 40 : 43, 33, 46),
+      fontSize: responsiveFont(isShortScreen ? 24 : 26, 20, 28),
+      lineHeight: responsiveFont(isShortScreen ? 30 : 32, 24, 34),
       fontWeight: '500',
     },
     intentWrap: {
       marginTop: vh(1.4),
-      borderRadius: moderateScale(20),
+      marginLeft: -vw(4.4),
+      width: '50%',
+      alignSelf: 'flex-start',
+      borderTopLeftRadius: 0,
+      borderBottomLeftRadius: 0,
+      borderTopRightRadius: moderateScale(20),
+      borderBottomRightRadius: moderateScale(20),
       backgroundColor: '#2eb8c6',
       minHeight: moderateScale(52),
       justifyContent: 'center',
@@ -623,11 +668,12 @@ function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }) 
     },
     intentAccent: {
       position: 'absolute',
-      left: 0,
-      top: 0,
-      bottom: 0,
+      left: moderateScale(3),
+      top: moderateScale(7),
+      bottom: moderateScale(7),
       width: moderateScale(8),
-      backgroundColor: '#f4f4f4',
+      backgroundColor: '#f0ece3',
+      borderRadius: moderateScale(6),
     },
     intentText: {
       color: '#ffffff',
@@ -638,8 +684,8 @@ function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }) 
     industryText: {
       marginTop: vh(1.3),
       color: '#9a9a9a',
-      fontSize: responsiveFont(17, 13, 18),
-      lineHeight: responsiveFont(21, 16, 22),
+      fontSize: responsiveFont(15, 13, 17),
+      lineHeight: responsiveFont(20, 16, 22),
       fontWeight: '400',
     },
     sectionCard: {
@@ -652,15 +698,15 @@ function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }) 
     },
     sectionTitle: {
       color: '#151515',
-      fontSize: responsiveFont(isShortScreen ? 28 : 32, 24, 38),
-      lineHeight: responsiveFont(isShortScreen ? 34 : 40, 29, 46),
-      fontWeight: '400',
+      fontSize: responsiveFont(isShortScreen ? 22 : 24, 18, 26),
+      lineHeight: responsiveFont(isShortScreen ? 28 : 30, 24, 32),
+      fontWeight: '500',
     },
     sectionBody: {
       marginTop: vh(0.6),
       color: '#a0a0a0',
-      fontSize: responsiveFont(18, 14, 19),
-      lineHeight: responsiveFont(22, 18, 24),
+      fontSize: responsiveFont(16, 14, 18),
+      lineHeight: responsiveFont(21, 18, 23),
       fontWeight: '400',
     },
     chipsWrap: {
@@ -689,6 +735,14 @@ function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }) 
       flexDirection: 'row',
       alignItems: 'flex-start',
     },
+    experienceRowSpaced: {
+      marginTop: vh(1.6),
+    },
+    experienceRowWithDivider: {
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: '#a5a5a5',
+      paddingBottom: vh(1.4),
+    },
     experienceIcon: {
       width: moderateScale(38),
       height: moderateScale(38),
@@ -702,22 +756,22 @@ function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }) 
     },
     experienceCompany: {
       color: '#151515',
-      fontSize: responsiveFont(20, 15, 22),
-      lineHeight: responsiveFont(24, 19, 26),
+      fontSize: responsiveFont(18, 15, 20),
+      lineHeight: responsiveFont(23, 19, 25),
       fontWeight: '500',
     },
     experienceRole: {
       color: '#151515',
-      fontSize: responsiveFont(18, 14, 20),
-      lineHeight: responsiveFont(22, 18, 24),
-      fontWeight: '500',
+      fontSize: responsiveFont(16, 14, 18),
+      lineHeight: responsiveFont(21, 18, 23),
+      fontWeight: '400',
       marginTop: vh(0.2),
     },
     experienceDate: {
       marginTop: vh(0.2),
       color: '#a0a0a0',
-      fontSize: responsiveFont(17, 13, 18),
-      lineHeight: responsiveFont(21, 16, 22),
+      fontSize: responsiveFont(15, 13, 17),
+      lineHeight: responsiveFont(20, 16, 22),
       fontWeight: '400',
     },
     placeholderWrap: {
