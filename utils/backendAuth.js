@@ -357,6 +357,63 @@ export async function getMyMatches({
   return normalizeMatchesPayload(payload);
 }
 
+export async function postMatchAction({
+  firebaseToken,
+  candidateId,
+  action,
+  connectionMessage = '',
+} = {}) {
+  if (!candidateId) {
+    throw new Error('candidateId is required for match action.');
+  }
+
+  const headers = {
+    'Content-Type': 'application/json',
+  };
+
+  if (firebaseToken) {
+    headers.Authorization = `Bearer ${firebaseToken}`;
+  }
+
+  const body = {
+    action: String(action || '').trim(),
+  };
+
+  const trimmedMessage = String(connectionMessage || '').trim();
+  if (trimmedMessage) {
+    body.connection_message = trimmedMessage;
+  }
+
+  const response = await fetch(
+    `${API_BASE_URL}${USER_MATCHES_PATH}/${encodeURIComponent(candidateId)}/actions`,
+    {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+    },
+  );
+
+  let payload = null;
+  try {
+    payload = await response.json();
+  } catch {
+    payload = null;
+  }
+
+  if (!response.ok) {
+    const error = new Error(
+      payload?.detail ||
+        payload?.message ||
+        `Match action failed with status ${response.status}`,
+    );
+    error.status = response.status;
+    error.payload = payload;
+    throw error;
+  }
+
+  return payload;
+}
+
 export async function uploadProfileImage(imageUri, firebaseToken) {
   const normalizedUri = String(imageUri || "").trim();
 

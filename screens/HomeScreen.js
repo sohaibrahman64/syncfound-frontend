@@ -2,16 +2,20 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Animated,
+  FlatList,
   Image,
+  Modal,
   PanResponder,
   Pressable,
   SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
-import { getMyMatches } from '../utils/backendAuth';
+import { BlurView } from 'expo-blur';
+import { getMyMatches, postMatchAction } from '../utils/backendAuth';
 import { getCurrentFirebaseIdToken } from '../utils/firebaseAuth';
 import { FLAG_ASSET_MAP } from '../utils/flagAssetMap';
 import { useResponsiveMetrics } from '../utils/responsive';
@@ -59,6 +63,7 @@ function toMatchCardModel(item) {
         : ''),
     experienceSummary: String(item?.experience_summary || '').trim(),
     startupIdea: String(item?.startup_idea || '').trim(),
+    bio: String(item?.bio || item?.user_bio || '').trim(),
     userSkills: normalizeSkills(item?.user_skills),
     cofounderSkills: normalizeSkills(item?.cofounder_skills),
     linkedinHeadline: String(item?.linkedin_headline || '').trim(),
@@ -228,6 +233,42 @@ function MatchCard({ card, styles }) {
   );
 }
 
+function DiscoverListItem({ card, styles, onPress }) {
+  const flagSource = resolveFlagSource(card.countryCode);
+
+  return (
+    <Pressable style={styles.discoverItem} onPress={() => onPress?.(card)}>
+      <View style={styles.discoverPhotoWrap}>
+        {card.profilePhotoUrl ? (
+          <Image source={{ uri: card.profilePhotoUrl }} style={styles.discoverPhoto} />
+        ) : (
+          <Image source={require('../assets/cofounders.jpg')} style={styles.discoverPhoto} />
+        )}
+      </View>
+
+      <View style={styles.discoverContent}>
+        <View style={styles.discoverHeaderRow}>
+          <Text style={styles.discoverName} numberOfLines={1}>{card.displayName}</Text>
+          <View style={styles.discoverLocationWrap}>
+            {flagSource ? <Image source={flagSource} style={styles.discoverFlag} /> : null}
+            <Text style={styles.discoverLocation} numberOfLines={1}>{card.locationText}</Text>
+          </View>
+        </View>
+
+        {!!card.bio && (
+          <Text style={styles.discoverBio} numberOfLines={3}>
+            {`\u201c${card.bio}\u201d`}
+          </Text>
+        )}
+
+        <View style={styles.discoverBadgePill}>
+          <Text style={styles.discoverBadgeText} numberOfLines={1}>{card.intentBadge}</Text>
+        </View>
+      </View>
+    </Pressable>
+  );
+}
+
 export default function HomeScreen({ firebaseToken = '', onAuthExpired }) {
   const metrics = useResponsiveMetrics();
   const styles = useMemo(() => createStyles(metrics), [metrics]);
@@ -241,9 +282,21 @@ export default function HomeScreen({ firebaseToken = '', onAuthExpired }) {
   const [isPaging, setIsPaging] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
 
+  const [likeModal, setLikeModal] = useState({ visible: false, card: null });
+  const [selectedDiscoverCard, setSelectedDiscoverCard] = useState(null);
+  const [connectionMessage, setConnectionMessage] = useState('');
+  const [isSendingLike, setIsSendingLike] = useState(false);
+  const [isSubmittingCardAction, setIsSubmittingCardAction] = useState(false);
+  const [likeError, setLikeError] = useState('');
+
+  const CONNECTION_MESSAGE_LIMIT = 1000;
+  const trimmedConnectionMessage = connectionMessage.trim();
+  const isSendLikeDisabled = isSendingLike || !trimmedConnectionMessage;
+
   const currentCard = cards[activeIndex] || null;
   const nextCard = cards[activeIndex + 1] || null;
   const remainingCards = Math.max(cards.length - activeIndex, 0);
+  const actionTargetCard = mode === MODE_DISCOVER ? selectedDiscoverCard : currentCard;
 
   const swipeThreshold = Math.min(metrics.vw(22), 120);
 
@@ -308,6 +361,12 @@ export default function HomeScreen({ firebaseToken = '', onAuthExpired }) {
   }, [loadMatches, mode]);
 
   useEffect(() => {
+    if (mode !== MODE_DISCOVER) {
+      setSelectedDiscoverCard(null);
+    }
+  }, [mode]);
+
+  useEffect(() => {
     if (remainingCards > 3) {
       return;
     }
@@ -338,6 +397,155 @@ export default function HomeScreen({ firebaseToken = '', onAuthExpired }) {
     [goToNextCard, metrics, swipePosition],
   );
 
+  const springCardBack = useCallback(() => {
+    Animated.spring(swipePosition, {
+      toValue: { x: 0, y: 0 },
+      friction: 6,
+      tension: 80,
+      useNativeDriver: false,
+    }).start();
+  }, [swipePosition]);
+
+  const openLikeModal = useCallback((card) => {
+    springCardBack();
+    setConnectionMessage('');
+    setLikeError('');
+    setLikeModal({ visible: true, card });
+  }, [springCardBack]);
+
+  const closeLikeModal = useCallback(() => {
+    setLikeModal({ visible: false, card: null });
+    setConnectionMessage('');
+    setLikeError('');
+  }, []);
+
+  const handleCardAction = useCallback(
+    async ({ card, action, onSuccess } = {}) => {
+      if (!card || isSubmittingCardAction) {
+        return;
+      }
+
+      setIsSubmittingCardAction(true);
+
+      try {
+        const token = await getCurrentFirebaseIdToken(false).catch(() => firebaseToken);
+        await postMatchAction({
+          firebaseToken: token,
+          candidateId: card.candidateId,
+          action,
+        });
+        onSuccess?.();
+      } catch (error) {
+        const isAuthError =
+          error?.status === 401 ||
+          /invalid firebase token|unauthori[sz]ed|token/i.test(String(error?.message || ''));
+
+        if (isAuthError) {
+          onAuthExpired?.();
+        }
+      } finally {
+        setIsSubmittingCardAction(false);
+      }
+    },
+    [firebaseToken, isSubmittingCardAction, onAuthExpired],
+  );
+
+  const handlePassAction = useCallback(() => {
+    if (!actionTargetCard) {
+      return;
+    }
+
+    void handleCardAction({
+      card: actionTargetCard,
+      action: 'pass',
+      onSuccess: () => {
+        if (mode === MODE_DISCOVER) {
+          setCards((prev) => prev.filter((item) => item.candidateId !== actionTargetCard.candidateId));
+          setSelectedDiscoverCard(null);
+          return;
+        }
+
+        animateCardOut('left');
+      },
+    });
+  }, [actionTargetCard, animateCardOut, handleCardAction, mode]);
+
+  const handleDiscoverEndReached = useCallback(() => {
+    if (!nextCursor || isPaging || isInitialLoading) {
+      return;
+    }
+
+    loadMatches({ requestedMode: MODE_DISCOVER, cursor: nextCursor, append: true });
+  }, [isInitialLoading, isPaging, loadMatches, nextCursor]);
+
+  const handleSaveAction = useCallback(() => {
+    if (!actionTargetCard) {
+      return;
+    }
+
+    void handleCardAction({
+      card: actionTargetCard,
+      action: 'save',
+      onSuccess: () => {
+        if (mode === MODE_DISCOVER) {
+          setCards((prev) => prev.filter((item) => item.candidateId !== actionTargetCard.candidateId));
+          setSelectedDiscoverCard(null);
+          return;
+        }
+
+        goToNextCard();
+      },
+    });
+  }, [actionTargetCard, goToNextCard, handleCardAction, mode]);
+
+  const handleSelectDiscoverCard = useCallback((card) => {
+    setSelectedDiscoverCard(card || null);
+  }, []);
+
+  const handleBackToDiscoverList = useCallback(() => {
+    setSelectedDiscoverCard(null);
+  }, []);
+
+  const handleSendLike = useCallback(async () => {
+    if (!likeModal.card || isSendLikeDisabled) {
+      return;
+    }
+
+    setIsSendingLike(true);
+    setLikeError('');
+
+    try {
+      const token = await getCurrentFirebaseIdToken(false).catch(() => firebaseToken);
+      await postMatchAction({
+        firebaseToken: token,
+        candidateId: likeModal.card.candidateId,
+        action: 'like',
+        connectionMessage: trimmedConnectionMessage,
+      });
+      closeLikeModal();
+
+      if (mode === MODE_DISCOVER && selectedDiscoverCard) {
+        setCards((prev) => prev.filter((item) => item.candidateId !== selectedDiscoverCard.candidateId));
+        setSelectedDiscoverCard(null);
+      } else {
+        animateCardOut('right');
+      }
+    } catch (error) {
+      setLikeError(error?.message || 'Could not send like. Please try again.');
+    } finally {
+      setIsSendingLike(false);
+    }
+  }, [
+    animateCardOut,
+    closeLikeModal,
+    firebaseToken,
+    isSendLikeDisabled,
+    likeModal.card,
+    mode,
+    selectedDiscoverCard,
+    trimmedConnectionMessage,
+  ]);
+
   const panResponder = useMemo(
     () =>
       PanResponder.create({
@@ -355,12 +563,14 @@ export default function HomeScreen({ firebaseToken = '', onAuthExpired }) {
         ], { useNativeDriver: false }),
         onPanResponderRelease: (_, gestureState) => {
           if (gestureState.dx > swipeThreshold) {
-            animateCardOut('right');
+            if (currentCard) {
+              openLikeModal(currentCard);
+            }
             return;
           }
 
           if (gestureState.dx < -swipeThreshold) {
-            animateCardOut('left');
+            handlePassAction();
             return;
           }
 
@@ -372,7 +582,7 @@ export default function HomeScreen({ firebaseToken = '', onAuthExpired }) {
           }).start();
         },
       }),
-    [animateCardOut, swipePosition, swipeThreshold],
+    [handlePassAction, openLikeModal, currentCard, swipePosition, swipeThreshold],
   );
 
   const cardRotation = swipePosition.x.interpolate({
@@ -448,6 +658,34 @@ export default function HomeScreen({ firebaseToken = '', onAuthExpired }) {
               <Text style={styles.retryButtonText}>Refresh</Text>
             </Pressable>
           </View>
+        ) : mode === MODE_DISCOVER ? (
+          selectedDiscoverCard ? (
+            <View style={styles.discoverDetailWrap}>
+              <Pressable style={styles.discoverBackButton} onPress={handleBackToDiscoverList}>
+                <Text style={styles.discoverBackButtonText}>Back to Discover</Text>
+              </Pressable>
+              <MatchCard card={selectedDiscoverCard} styles={styles} />
+            </View>
+          ) : (
+            <FlatList
+              data={cards}
+              keyExtractor={(item) => String(item.candidateId ?? item.displayName)}
+              renderItem={({ item }) => (
+                <DiscoverListItem card={item} styles={styles} onPress={handleSelectDiscoverCard} />
+              )}
+              contentContainerStyle={styles.discoverListContent}
+              showsVerticalScrollIndicator={false}
+              onEndReached={handleDiscoverEndReached}
+              onEndReachedThreshold={0.4}
+              ListFooterComponent={
+                isPaging ? (
+                  <View style={styles.discoverPagingRow}>
+                    <ActivityIndicator size="small" color="#31c6d5" />
+                  </View>
+                ) : null
+              }
+            />
+          )
         ) : (
           <Animated.View style={[styles.swipeCard, cardTransformStyle]} {...panResponder.panHandlers}>
             <MatchCard card={currentCard} styles={styles} />
@@ -455,17 +693,17 @@ export default function HomeScreen({ firebaseToken = '', onAuthExpired }) {
         )}
       </View>
 
-      {!isInitialLoading && !!currentCard ? (
+      {!isInitialLoading && !!actionTargetCard && (mode !== MODE_DISCOVER || !!selectedDiscoverCard) ? (
         <View style={styles.actionRow}>
-          <Pressable style={styles.actionButton} onPress={() => animateCardOut('left')}>
+          <Pressable style={styles.actionButton} onPress={handlePassAction} disabled={isSubmittingCardAction}>
             <Image source={require('../assets/pass.png')} style={styles.actionIcon} />
           </Pressable>
 
-          <Pressable style={styles.actionButton} onPress={goToNextCard}>
+          <Pressable style={styles.actionButton} onPress={handleSaveAction} disabled={isSubmittingCardAction}>
             <Image source={require('../assets/save.png')} style={styles.actionIcon} />
           </Pressable>
 
-          <Pressable style={styles.actionButton} onPress={() => animateCardOut('right')}>
+          <Pressable style={styles.actionButton} onPress={() => actionTargetCard && openLikeModal(actionTargetCard)}>
             <Image source={require('../assets/heart.png')} style={styles.actionIcon} />
           </Pressable>
         </View>
@@ -498,6 +736,84 @@ export default function HomeScreen({ firebaseToken = '', onAuthExpired }) {
           <ActivityIndicator size="small" color="#31c6d5" />
         </View>
       ) : null}
+
+      <Modal
+        visible={likeModal.visible}
+        transparent
+        animationType="fade"
+        onRequestClose={closeLikeModal}
+        statusBarTranslucent
+        navigationBarTranslucent
+      >
+        <View style={styles.modalBackdrop}>
+          <BlurView intensity={28} tint="dark" style={styles.modalBlur} />
+          <View style={styles.modalTint} />
+          <Pressable style={styles.modalBackdropPressable} onPress={closeLikeModal} />
+
+          <View style={styles.modalCardContainer}>
+            <View style={styles.modalCard}>
+            {likeModal.card?.profilePhotoUrl ? (
+              <Image
+                source={{ uri: likeModal.card.profilePhotoUrl }}
+                style={styles.modalPhoto}
+              />
+            ) : (
+              <Image
+                source={require('../assets/cofounders.jpg')}
+                style={styles.modalPhoto}
+              />
+            )}
+
+            <Text style={styles.modalName} numberOfLines={1}>
+              {likeModal.card?.displayName || ''}
+            </Text>
+
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Write a connection message…"
+              placeholderTextColor="#a0a0a0"
+              value={connectionMessage}
+              onChangeText={(text) => {
+                setConnectionMessage(text.slice(0, CONNECTION_MESSAGE_LIMIT));
+                if (likeError) {
+                  setLikeError('');
+                }
+              }}
+              multiline
+              textAlignVertical="top"
+              maxLength={CONNECTION_MESSAGE_LIMIT}
+            />
+
+            <Text style={styles.modalCharCounter}>
+              {connectionMessage.length}/{CONNECTION_MESSAGE_LIMIT}
+            </Text>
+
+            {!!likeError && (
+              <Text style={styles.modalErrorText}>{likeError}</Text>
+            )}
+
+            <Pressable
+              style={[styles.modalSendButton, isSendLikeDisabled && styles.modalSendButtonDisabled]}
+              onPress={handleSendLike}
+              disabled={isSendLikeDisabled}
+            >
+              {isSendingLike ? (
+                <ActivityIndicator size="small" color="#ffffff" />
+              ) : (
+                <>
+                  <Image source={require('../assets/heart-white.png')} style={styles.modalSendIcon} />
+                  <Text style={styles.modalSendButtonText}>Send Like</Text>
+                </>
+              )}
+            </Pressable>
+
+            <Pressable onPress={closeLikeModal} hitSlop={10}>
+              <Text style={styles.modalCancelText}>Cancel</Text>
+            </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -897,6 +1213,235 @@ function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }) 
       borderRadius: 999,
       paddingHorizontal: vw(3),
       paddingVertical: vh(0.5),
+    },
+    modalBackdrop: {
+      flex: 1,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    modalBlur: {
+      ...StyleSheet.absoluteFillObject,
+    },
+    modalTint: {
+      ...StyleSheet.absoluteFillObject,
+      backgroundColor: 'rgba(0,0,0,0.34)',
+    },
+    modalBackdropPressable: {
+      ...StyleSheet.absoluteFillObject,
+    },
+    modalCardContainer: {
+      flex: 1,
+      width: '100%',
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: vw(4),
+    },
+    modalCard: {
+      width: vw(88),
+      maxWidth: 380,
+      backgroundColor: '#ffffff',
+      borderRadius: moderateScale(24),
+      paddingHorizontal: vw(6),
+      paddingTop: vh(3),
+      paddingBottom: vh(2.8),
+      alignItems: 'center',
+      shadowColor: '#000000',
+      shadowOpacity: 0.22,
+      shadowRadius: 20,
+      shadowOffset: { width: 0, height: 8 },
+      elevation: 12,
+    },
+    modalPhoto: {
+      width: moderateScale(96),
+      height: moderateScale(96),
+      borderRadius: moderateScale(48),
+      resizeMode: 'cover',
+      backgroundColor: '#d7d7d7',
+      marginBottom: vh(1.4),
+    },
+    modalName: {
+      color: '#161616',
+      fontSize: responsiveFont(isShortScreen ? 22 : 24, 18, 26),
+      lineHeight: responsiveFont(isShortScreen ? 28 : 30, 22, 32),
+      fontWeight: '600',
+      marginBottom: vh(1.8),
+      textAlign: 'center',
+    },
+    modalInput: {
+      width: '100%',
+      minHeight: moderateScale(110),
+      maxHeight: moderateScale(160),
+      borderBottomWidth: 1,
+      borderBottomColor: '#c8c8c8',
+      fontSize: responsiveFont(16, 14, 18),
+      lineHeight: responsiveFont(22, 18, 24),
+      color: '#2a2a2a',
+      fontStyle: 'italic',
+      paddingHorizontal: 0,
+      paddingTop: 0,
+      paddingBottom: vh(0.8),
+      textAlignVertical: 'top',
+    },
+    modalCharCounter: {
+      alignSelf: 'flex-end',
+      marginTop: vh(0.5),
+      color: '#a0a0a0',
+      fontSize: responsiveFont(13, 11, 15),
+      lineHeight: responsiveFont(17, 14, 20),
+      fontWeight: '400',
+      marginBottom: vh(1.4),
+    },
+    modalErrorText: {
+      color: '#c44f4f',
+      fontSize: responsiveFont(14, 12, 16),
+      lineHeight: responsiveFont(19, 16, 22),
+      fontWeight: '400',
+      textAlign: 'center',
+      marginBottom: vh(1),
+    },
+    modalSendButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: moderateScale(10),
+      backgroundColor: '#31c6d5',
+      borderRadius: 999,
+      minHeight: moderateScale(52),
+      paddingHorizontal: vw(8),
+      width: '80%',
+      marginBottom: vh(1.8),
+    },
+    modalSendButtonDisabled: {
+      opacity: 0.65,
+    },
+    modalSendIcon: {
+      width: moderateScale(22),
+      height: moderateScale(22),
+      resizeMode: 'contain',
+    },
+    modalSendButtonText: {
+      color: '#ffffff',
+      fontSize: responsiveFont(18, 15, 20),
+      lineHeight: responsiveFont(22, 18, 24),
+      fontWeight: '500',
+    },
+    modalCancelText: {
+      color: '#3d3d3d',
+      fontSize: responsiveFont(16, 14, 18),
+      lineHeight: responsiveFont(20, 17, 22),
+      fontWeight: '400',
+      textDecorationLine: 'underline',
+    },
+    discoverListContent: {
+      paddingTop: vh(1.4),
+      paddingBottom: vh(3),
+      paddingHorizontal: vw(4.2),
+      gap: moderateScale(14),
+    },
+    discoverDetailWrap: {
+      flex: 1,
+    },
+    discoverBackButton: {
+      alignSelf: 'flex-start',
+      marginTop: vh(1.2),
+      marginLeft: vw(4.2),
+      marginBottom: vh(0.4),
+      backgroundColor: '#ffffff',
+      borderRadius: 999,
+      paddingHorizontal: moderateScale(14),
+      paddingVertical: moderateScale(6),
+    },
+    discoverBackButtonText: {
+      color: '#3d556e',
+      fontSize: responsiveFont(14, 12, 16),
+      lineHeight: responsiveFont(18, 15, 20),
+      fontWeight: '500',
+    },
+    discoverItem: {
+      flexDirection: 'row',
+      backgroundColor: '#ffffff',
+      borderRadius: moderateScale(18),
+      padding: moderateScale(14),
+      shadowColor: '#000000',
+      shadowOpacity: 0.06,
+      shadowRadius: 8,
+      shadowOffset: { width: 0, height: 2 },
+      elevation: 2,
+    },
+    discoverPhotoWrap: {
+      width: moderateScale(76),
+      height: moderateScale(82),
+      borderRadius: moderateScale(12),
+      overflow: 'hidden',
+      backgroundColor: '#d7d7d7',
+      flexShrink: 0,
+    },
+    discoverPhoto: {
+      width: '100%',
+      height: '100%',
+      resizeMode: 'cover',
+    },
+    discoverContent: {
+      flex: 1,
+      marginLeft: moderateScale(12),
+      justifyContent: 'flex-start',
+    },
+    discoverHeaderRow: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      justifyContent: 'space-between',
+      gap: moderateScale(6),
+    },
+    discoverName: {
+      flex: 1,
+      color: '#161616',
+      fontSize: responsiveFont(17, 14, 19),
+      lineHeight: responsiveFont(22, 18, 24),
+      fontWeight: '600',
+    },
+    discoverLocationWrap: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      flexShrink: 0,
+      gap: moderateScale(4),
+    },
+    discoverFlag: {
+      width: moderateScale(20),
+      height: moderateScale(14),
+      resizeMode: 'contain',
+    },
+    discoverLocation: {
+      color: '#777777',
+      fontSize: responsiveFont(13, 11, 15),
+      lineHeight: responsiveFont(17, 14, 19),
+      fontWeight: '400',
+      maxWidth: vw(24),
+    },
+    discoverBio: {
+      marginTop: vh(0.5),
+      color: '#666666',
+      fontSize: responsiveFont(13, 11, 15),
+      lineHeight: responsiveFont(18, 15, 20),
+      fontWeight: '400',
+      fontStyle: 'italic',
+    },
+    discoverBadgePill: {
+      marginTop: vh(0.8),
+      alignSelf: 'flex-start',
+      backgroundColor: '#2eb8c6',
+      borderRadius: 999,
+      paddingHorizontal: moderateScale(14),
+      paddingVertical: moderateScale(6),
+    },
+    discoverBadgeText: {
+      color: '#ffffff',
+      fontSize: responsiveFont(13, 11, 15),
+      lineHeight: responsiveFont(17, 14, 19),
+      fontWeight: '500',
+    },
+    discoverPagingRow: {
+      paddingVertical: vh(2),
+      alignItems: 'center',
     },
   }));
 }
