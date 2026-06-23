@@ -9,6 +9,8 @@ const LINKEDIN_INGEST_PATH =
   process.env.EXPO_PUBLIC_LINKEDIN_INGEST_PATH || "/linkedin-profile/ingest";
 const INDUSTRIES_PATH = process.env.EXPO_PUBLIC_INDUSTRIES_PATH || "/industries";
 const USER_MATCHES_PATH = process.env.EXPO_PUBLIC_USER_MATCHES_PATH || "/users/me/matches";
+const USER_ENTITLEMENTS_PATH = process.env.EXPO_PUBLIC_USER_ENTITLEMENTS_PATH || "/users/me/entitlements";
+const PRICING_PLANS_PATH = process.env.EXPO_PUBLIC_PRICING_PLANS_PATH || "/pricing/plans";
 const IMAGE_UPLOAD_PATH = process.env.EXPO_PUBLIC_IMAGE_UPLOAD_PATH || "/images/upload";
 const IMAGE_REMOVE_PATH = process.env.EXPO_PUBLIC_IMAGE_REMOVE_PATH || "/images/remove";
 
@@ -362,6 +364,7 @@ export async function postMatchAction({
   candidateId,
   action,
   connectionMessage = '',
+  requestId = '',
 } = {}) {
   if (!candidateId) {
     throw new Error('candidateId is required for match action.');
@@ -382,6 +385,11 @@ export async function postMatchAction({
   const trimmedMessage = String(connectionMessage || '').trim();
   if (trimmedMessage) {
     body.connection_message = trimmedMessage;
+  }
+
+  const trimmedRequestId = String(requestId || '').trim();
+  if (trimmedRequestId) {
+    body.request_id = trimmedRequestId;
   }
 
   const response = await fetch(
@@ -412,6 +420,84 @@ export async function postMatchAction({
   }
 
   return payload;
+}
+
+export async function getEntitlements(firebaseToken = '') {
+  const headers = {
+    'Content-Type': 'application/json',
+  };
+
+  if (firebaseToken) {
+    headers.Authorization = `Bearer ${firebaseToken}`;
+  }
+
+  const response = await fetch(`${API_BASE_URL}${USER_ENTITLEMENTS_PATH}`, {
+    method: 'GET',
+    headers,
+  });
+
+  let payload = null;
+  try {
+    payload = await response.json();
+  } catch {
+    payload = null;
+  }
+
+  if (!response.ok) {
+    const error = new Error(
+      payload?.detail ||
+        payload?.message ||
+        `Failed to load entitlements with status ${response.status}`,
+    );
+    error.status = response.status;
+    error.payload = payload;
+    throw error;
+  }
+
+  return payload;
+}
+
+export async function getPricingPlans(firebaseToken = '') {
+  const headers = {
+    'Content-Type': 'application/json',
+  };
+
+  if (firebaseToken) {
+    headers.Authorization = `Bearer ${firebaseToken}`;
+  }
+
+  const response = await fetch(`${API_BASE_URL}${PRICING_PLANS_PATH}`, {
+    method: 'GET',
+    headers,
+  });
+
+  let payload = null;
+  try {
+    payload = await response.json();
+  } catch {
+    payload = null;
+  }
+
+  if (!response.ok) {
+    const error = new Error(
+      payload?.detail ||
+        payload?.message ||
+        `Failed to load pricing plans with status ${response.status}`,
+    );
+    error.status = response.status;
+    error.payload = payload;
+    throw error;
+  }
+
+  if (Array.isArray(payload)) {
+    return payload;
+  }
+
+  if (Array.isArray(payload?.data)) {
+    return payload.data;
+  }
+
+  return [];
 }
 
 export async function uploadProfileImage(imageUri, firebaseToken) {

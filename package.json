@@ -21,6 +21,7 @@
     "expo-blur": "~55.0.14",
     "expo-font": "^55.0.7",
     "expo-image-picker": "~55.0.20",
+    "expo-linear-gradient": "~15.0.8",
     "expo-status-bar": "~55.0.6",
     "firebase": "^12.13.0",
     "react": "19.2.0",
@@ -32,7 +33,16 @@
   },
   "private": true,
   "devDependencies": {
+    "@testing-library/react-native": "^12.9.0",
     "@types/react": "~19.2.10",
+    "jest-expo": "~55.0.0",
+    "react-test-renderer": "19.2.0",
     "typescript": "~5.9.2"
+  },
+  "jest": {
+    "preset": "jest-expo",
+    "transformIgnorePatterns": [
+      "node_modules/(?!((jest-)?react-native|@react-native(-community)?)|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|@unimodules/.*|unimodules|sentry-expo|native-base|react-native-svg)"
+    ]
   }
 }

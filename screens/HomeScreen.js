@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  AppState,
   Animated,
   FlatList,
   Image,
@@ -15,10 +16,17 @@ import {
   View,
 } from 'react-native';
 import { BlurView } from 'expo-blur';
-import { getMyMatches, postMatchAction } from '../utils/backendAuth';
+import { LinearGradient } from 'expo-linear-gradient';
+import { getEntitlements, getMyMatches, getPricingPlans, postMatchAction } from '../utils/backendAuth';
 import { getCurrentFirebaseIdToken } from '../utils/firebaseAuth';
 import { FLAG_ASSET_MAP } from '../utils/flagAssetMap';
 import { useResponsiveMetrics } from '../utils/responsive';
+import {
+  generateRequestId,
+  logAnalyticsEvent,
+  processActionResponse,
+  shouldShowFallbackAd,
+} from '../utils/swipeMonetization';
 import { withPlatformFontStyles } from '../utils/typography';
 
 const PAGE_LIMIT = 20;
@@ -289,9 +297,23 @@ export default function HomeScreen({ firebaseToken = '', onAuthExpired }) {
   const [isSubmittingCardAction, setIsSubmittingCardAction] = useState(false);
   const [likeError, setLikeError] = useState('');
 
+  // Monetization state
+  const [paywallVisible, setPaywallVisible] = useState(false);
+  const [interstitialVisible, setInterstitialVisible] = useState(false);
+  const [swipesUsed, setSwipesUsed] = useState(null);
+  const [swipesRemaining, setSwipesRemaining] = useState(null);
+  // resumedAfterPaywall enables the local fallback ad counter (every 4 swipes)
+  const [resumedAfterPaywall, setResumedAfterPaywall] = useState(false);
+  const [entitlements, setEntitlements] = useState(null);
+  const [pricingPlans, setPricingPlans] = useState([]);
+  const resumeActionCountRef = useRef(0);
+  // Holds the card-advance callback to execute once the interstitial is dismissed
+  const pendingAdvanceRef = useRef(null);
+
   const CONNECTION_MESSAGE_LIMIT = 1000;
   const trimmedConnectionMessage = connectionMessage.trim();
-  const isSendLikeDisabled = isSendingLike || !trimmedConnectionMessage;
+  // Disable the Send Like button when a submission is already in flight or message is empty
+  const isSendLikeDisabled = isSubmittingCardAction || !trimmedConnectionMessage;
 
   const currentCard = cards[activeIndex] || null;
   const nextCard = cards[activeIndex + 1] || null;
@@ -419,22 +441,166 @@ export default function HomeScreen({ firebaseToken = '', onAuthExpired }) {
     setLikeError('');
   }, []);
 
-  const handleCardAction = useCallback(
-    async ({ card, action, onSuccess } = {}) => {
+  // ---------------------------------------------------------------------------
+  // Entitlements — fetched on mount and on app foreground resume.
+  // Server response from the action endpoint is the source of truth for
+  // paywall/ad triggers; entitlements are advisory for UI indicators only.
+  // ---------------------------------------------------------------------------
+  const fetchEntitlements = useCallback(async () => {
+    try {
+      const token = await getCurrentFirebaseIdToken(false).catch(() => firebaseToken);
+      const data = await getEntitlements(token);
+      setEntitlements(data);
+      if (data?.matchmaking_swipe_limit != null) {
+        setSwipesRemaining(data.matchmaking_swipe_limit);
+      }
+    } catch {
+      // Entitlements are advisory — silently ignore errors
+    }
+  }, [firebaseToken]);
+
+  const fetchPricingPlans = useCallback(async () => {
+    try {
+      const token = await getCurrentFirebaseIdToken(false).catch(() => firebaseToken);
+      const plans = await getPricingPlans(token);
+      setPricingPlans(Array.isArray(plans) ? plans : []);
+    } catch {
+      setPricingPlans([]);
+    }
+  }, [firebaseToken]);
+
+  useEffect(() => {
+    fetchEntitlements();
+    fetchPricingPlans();
+  }, [fetchEntitlements]);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active') {
+        fetchEntitlements();
+        fetchPricingPlans();
+      }
+    });
+    return () => subscription.remove();
+  }, [fetchEntitlements]);
+
+  const premiumPlan = useMemo(
+    () => pricingPlans.find((plan) => String(plan?.tier || '').toLowerCase() === 'premium') || null,
+    [pricingPlans],
+  );
+
+  const premiumPriceText = useMemo(() => {
+    const priceMinor = Number(premiumPlan?.price_minor);
+    if (!Number.isFinite(priceMinor)) {
+      return 'Only $9.99 per month';
+    }
+
+    const currencyCode = String(premiumPlan?.currency_code || 'USD').toUpperCase();
+    const currencySymbol = currencyCode === 'USD' ? '$' : `${currencyCode} `;
+    return `Only ${currencySymbol}${(priceMinor / 100).toFixed(2)} per month`;
+  }, [premiumPlan]);
+
+  // ---------------------------------------------------------------------------
+  // Unified swipe action handler — used by all four entry points:
+  //   left-swipe gesture, right-swipe gesture, pass button, like button.
+  //
+  // Handles backend response flags:
+  //   swipe_allowed=false + paywall_required=true → open paywall, keep card
+  //   ad_due_now=true                             → show interstitial, then advance
+  //   mutual_match=true                           → analytics + advance normally
+  //
+  // Backend caveat: free users hit a 10-swipe daily cap. After "Maybe Later"
+  // dismissal, subsequent calls may STILL return paywall_required=true. The
+  // frontend handles this gracefully by just re-showing the paywall modal.
+  // ---------------------------------------------------------------------------
+  const swipeAction = useCallback(
+    async ({ card, action, connectionMessage: msgOverride = '', onClose } = {}) => {
       if (!card || isSubmittingCardAction) {
         return;
       }
 
       setIsSubmittingCardAction(true);
+      if (action === 'like') {
+        setIsSendingLike(true);
+        setLikeError('');
+      }
+
+      const requestId = generateRequestId();
+      logAnalyticsEvent('matches_action_submitted', { action, candidateId: card.candidateId });
 
       try {
         const token = await getCurrentFirebaseIdToken(false).catch(() => firebaseToken);
-        await postMatchAction({
+        const rawResult = await postMatchAction({
           firebaseToken: token,
           candidateId: card.candidateId,
           action,
+          connectionMessage: msgOverride,
+          requestId,
         });
-        onSuccess?.();
+
+        const result = processActionResponse(rawResult);
+
+        if (rawResult?.swipes_used != null) {
+          setSwipesUsed(rawResult.swipes_used);
+        }
+        if (rawResult?.swipes_remaining != null) {
+          setSwipesRemaining(rawResult.swipes_remaining);
+        }
+
+        // --- Paywall required: keep card, show paywall, do not advance ---
+        if (result.isPaywallRequired) {
+          logAnalyticsEvent('matches_action_paywall_required', { candidateId: card.candidateId });
+          onClose?.();
+          setPaywallVisible(true);
+          return;
+        }
+
+        // --- Mutual match: log analytics, then advance normally ---
+        if (result.isMutualMatch) {
+          logAnalyticsEvent('matches_mutual_match', { candidateId: card.candidateId });
+          // Existing UX: no dedicated mutual match modal — advance card as normal
+        }
+
+        onClose?.();
+
+        // Build the advance callback based on action type and current mode
+        const advanceCard = () => {
+          if (mode === MODE_DISCOVER) {
+            setCards((prev) => prev.filter((item) => item.candidateId !== card.candidateId));
+            setSelectedDiscoverCard(null);
+            return;
+          }
+          if (action === 'pass') {
+            animateCardOut('left');
+          } else if (action === 'like') {
+            animateCardOut('right');
+          } else {
+            // save and other non-directional actions
+            goToNextCard();
+          }
+        };
+
+        // --- Backend-triggered interstitial ---
+        if (result.isAdDueNow) {
+          logAnalyticsEvent('matches_interstitial_shown', { trigger: 'backend' });
+          pendingAdvanceRef.current = advanceCard;
+          setInterstitialVisible(true);
+          return;
+        }
+
+        // --- Local fallback interstitial (active only after "Maybe Later") ---
+        if (resumedAfterPaywall) {
+          resumeActionCountRef.current += 1;
+          if (shouldShowFallbackAd(resumeActionCountRef.current)) {
+            resumeActionCountRef.current = 0;
+            logAnalyticsEvent('matches_interstitial_shown', { trigger: 'local_fallback' });
+            pendingAdvanceRef.current = advanceCard;
+            setInterstitialVisible(true);
+            return;
+          }
+        }
+
+        advanceCard();
       } catch (error) {
         const isAuthError =
           error?.status === 401 ||
@@ -442,33 +608,36 @@ export default function HomeScreen({ firebaseToken = '', onAuthExpired }) {
 
         if (isAuthError) {
           onAuthExpired?.();
+          return;
+        }
+
+        if (action === 'like') {
+          setLikeError(error?.message || 'Could not send like. Please try again.');
         }
       } finally {
         setIsSubmittingCardAction(false);
+        if (action === 'like') {
+          setIsSendingLike(false);
+        }
       }
     },
-    [firebaseToken, isSubmittingCardAction, onAuthExpired],
+    [
+      animateCardOut,
+      firebaseToken,
+      goToNextCard,
+      isSubmittingCardAction,
+      mode,
+      onAuthExpired,
+      resumedAfterPaywall,
+    ],
   );
 
   const handlePassAction = useCallback(() => {
     if (!actionTargetCard) {
       return;
     }
-
-    void handleCardAction({
-      card: actionTargetCard,
-      action: 'pass',
-      onSuccess: () => {
-        if (mode === MODE_DISCOVER) {
-          setCards((prev) => prev.filter((item) => item.candidateId !== actionTargetCard.candidateId));
-          setSelectedDiscoverCard(null);
-          return;
-        }
-
-        animateCardOut('left');
-      },
-    });
-  }, [actionTargetCard, animateCardOut, handleCardAction, mode]);
+    void swipeAction({ card: actionTargetCard, action: 'pass' });
+  }, [actionTargetCard, swipeAction]);
 
   const handleDiscoverEndReached = useCallback(() => {
     if (!nextCursor || isPaging || isInitialLoading) {
@@ -482,21 +651,8 @@ export default function HomeScreen({ firebaseToken = '', onAuthExpired }) {
     if (!actionTargetCard) {
       return;
     }
-
-    void handleCardAction({
-      card: actionTargetCard,
-      action: 'save',
-      onSuccess: () => {
-        if (mode === MODE_DISCOVER) {
-          setCards((prev) => prev.filter((item) => item.candidateId !== actionTargetCard.candidateId));
-          setSelectedDiscoverCard(null);
-          return;
-        }
-
-        goToNextCard();
-      },
-    });
-  }, [actionTargetCard, goToNextCard, handleCardAction, mode]);
+    void swipeAction({ card: actionTargetCard, action: 'save' });
+  }, [actionTargetCard, swipeAction]);
 
   const handleSelectDiscoverCard = useCallback((card) => {
     setSelectedDiscoverCard(card || null);
@@ -506,45 +662,17 @@ export default function HomeScreen({ firebaseToken = '', onAuthExpired }) {
     setSelectedDiscoverCard(null);
   }, []);
 
-  const handleSendLike = useCallback(async () => {
+  const handleSendLike = useCallback(() => {
     if (!likeModal.card || isSendLikeDisabled) {
       return;
     }
-
-    setIsSendingLike(true);
-    setLikeError('');
-
-    try {
-      const token = await getCurrentFirebaseIdToken(false).catch(() => firebaseToken);
-      await postMatchAction({
-        firebaseToken: token,
-        candidateId: likeModal.card.candidateId,
-        action: 'like',
-        connectionMessage: trimmedConnectionMessage,
-      });
-      closeLikeModal();
-
-      if (mode === MODE_DISCOVER && selectedDiscoverCard) {
-        setCards((prev) => prev.filter((item) => item.candidateId !== selectedDiscoverCard.candidateId));
-        setSelectedDiscoverCard(null);
-      } else {
-        animateCardOut('right');
-      }
-    } catch (error) {
-      setLikeError(error?.message || 'Could not send like. Please try again.');
-    } finally {
-      setIsSendingLike(false);
-    }
-  }, [
-    animateCardOut,
-    closeLikeModal,
-    firebaseToken,
-    isSendLikeDisabled,
-    likeModal.card,
-    mode,
-    selectedDiscoverCard,
-    trimmedConnectionMessage,
-  ]);
+    void swipeAction({
+      card: likeModal.card,
+      action: 'like',
+      connectionMessage: trimmedConnectionMessage,
+      onClose: closeLikeModal,
+    });
+  }, [closeLikeModal, isSendLikeDisabled, likeModal.card, swipeAction, trimmedConnectionMessage]);
 
   const panResponder = useMemo(
     () =>
@@ -811,6 +939,145 @@ export default function HomeScreen({ firebaseToken = '', onAuthExpired }) {
               <Text style={styles.modalCancelText}>Cancel</Text>
             </Pressable>
             </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ------------------------------------------------------------------ */}
+      {/* Paywall modal — shown when backend returns paywall_required=true    */}
+      {/* ------------------------------------------------------------------ */}
+      <Modal
+        visible={paywallVisible}
+        transparent={false}
+        animationType="slide"
+        onRequestClose={() => {
+          logAnalyticsEvent('matches_paywall_maybe_later');
+          setResumedAfterPaywall(true);
+          resumeActionCountRef.current = 0;
+          setPaywallVisible(false);
+        }}
+        statusBarTranslucent
+        navigationBarTranslucent
+      >
+        <LinearGradient
+          colors={['#d6f0ee', '#45c2c9']}
+          start={{ x: 0.5, y: 0 }}
+          end={{ x: 0.5, y: 1 }}
+          style={styles.paywallContainer}
+        >
+          {/* Top bar */}
+          <View style={styles.paywallTopBar}>
+            <View style={styles.paywallLogoRow}>
+              <Image
+                source={require('../assets/syncfound_text_logo_black.png')}
+                style={styles.paywallWordmark}
+              />
+            </View>
+            <Pressable
+              style={styles.paywallCloseButton}
+              hitSlop={12}
+              onPress={() => {
+                logAnalyticsEvent('matches_paywall_maybe_later');
+                setResumedAfterPaywall(true);
+                resumeActionCountRef.current = 0;
+                setPaywallVisible(false);
+              }}
+            >
+              <Text style={styles.paywallCloseText}>✕</Text>
+            </Pressable>
+          </View>
+
+          {/* Icon */}
+          <View style={styles.paywallIconWrap}>
+            <Image source={require('../assets/flash.png')} style={styles.paywallMainIcon} />
+          </View>
+
+          {/* Heading */}
+          <Text style={styles.paywallTitle}>Daily Matchmaking{'\n'}Capped at 10 Swipes</Text>
+
+          {/* Subtitle */}
+          <Text style={styles.paywallSubtitle}>
+            You've reached today's limit for discoveries. Our community thrives on meaningful
+            connections, and we're excited to see who you find tomorrow!
+          </Text>
+
+          {/* Info cards */}
+          <View style={styles.paywallInfoCard}>
+            <Image source={require('../assets/eye.png')} style={styles.paywallInfoIconImage} />
+            <View style={styles.paywallInfoContent}>
+              <Text style={styles.paywallInfoTitle}>Transparency Note</Text>
+              <Text style={styles.paywallInfoBody}>
+                Ads are shown after every 4 swipes for free accounts
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.paywallInfoCard}>
+            <Image source={require('../assets/refresh.png')} style={styles.paywallInfoIconImage} />
+            <View style={styles.paywallInfoContent}>
+              <Text style={styles.paywallInfoTitle}>Next Refresh</Text>
+              <Text style={styles.paywallInfoBody}>Your swipe counter resets in 24 hours.</Text>
+            </View>
+          </View>
+
+          {/* CTA */}
+          <View style={styles.paywallUpgradeWrap}>
+            <Pressable style={styles.paywallUpgradeButton}>
+              <Text style={styles.paywallUpgradeText}>Upgrade to Premium</Text>
+            </Pressable>
+            <Text style={styles.paywallPriceText}>{premiumPriceText}</Text>
+          </View>
+
+          <Pressable
+            hitSlop={12}
+            onPress={() => {
+              logAnalyticsEvent('matches_paywall_maybe_later');
+              setResumedAfterPaywall(true);
+              resumeActionCountRef.current = 0;
+              setPaywallVisible(false);
+            }}
+          >
+            <Text style={styles.paywallMaybeLaterText}>Maybe Later</Text>
+          </Pressable>
+        </LinearGradient>
+      </Modal>
+
+      {/* ------------------------------------------------------------------ */}
+      {/* Interstitial ad placeholder                                         */}
+      {/* Replace inner content with your ad SDK (e.g. react-native-google-  */}
+      {/* mobile-ads InterstitialAd) when available.                          */}
+      {/* ------------------------------------------------------------------ */}
+      <Modal
+        visible={interstitialVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          const advance = pendingAdvanceRef.current;
+          pendingAdvanceRef.current = null;
+          setInterstitialVisible(false);
+          advance?.();
+        }}
+        statusBarTranslucent
+        navigationBarTranslucent
+      >
+        <View style={styles.interstitialBackdrop}>
+          <View style={styles.interstitialCard}>
+            <Text style={styles.interstitialLabel}>Advertisement</Text>
+            {/* Ad SDK component goes here */}
+            <View style={styles.interstitialAdPlaceholder}>
+              <Text style={styles.interstitialAdPlaceholderText}>Ad</Text>
+            </View>
+            <Pressable
+              style={styles.interstitialContinueButton}
+              onPress={() => {
+                const advance = pendingAdvanceRef.current;
+                pendingAdvanceRef.current = null;
+                setInterstitialVisible(false);
+                advance?.();
+              }}
+            >
+              <Text style={styles.interstitialContinueText}>Continue</Text>
+            </Pressable>
           </View>
         </View>
       </Modal>
@@ -1442,6 +1709,216 @@ function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }) 
     discoverPagingRow: {
       paddingVertical: vh(2),
       alignItems: 'center',
+    },
+
+    // -------------------------------------------------------------------------
+    // Paywall modal styles
+    // -------------------------------------------------------------------------
+    paywallContainer: {
+      flex: 1,
+      paddingHorizontal: vw(6),
+      paddingTop: isShortScreen ? vh(3) : vh(5),
+      paddingBottom: vh(4),
+      alignItems: 'center',
+    },
+    paywallTopBar: {
+      width: '100%',
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginBottom: vh(2.5),
+    },
+    paywallLogoRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+    },
+    paywallWordmark: {
+      width: vw(36),
+      height: moderateScale(28),
+      resizeMode: 'contain',
+      tintColor: '#2bb8c6',
+    },
+    paywallCloseButton: {
+      width: moderateScale(36),
+      height: moderateScale(36),
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    paywallCloseText: {
+      fontSize: responsiveFont(28, 24, 30),
+      color: '#2e5a6e',
+      fontWeight: '400',
+    },
+    paywallIconWrap: {
+      width: moderateScale(80),
+      height: moderateScale(80),
+      borderRadius: moderateScale(20),
+      backgroundColor: '#ffffff',
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginBottom: vh(2),
+      shadowColor: '#000000',
+      shadowOpacity: 0.1,
+      shadowRadius: 8,
+      shadowOffset: { width: 0, height: 4 },
+      elevation: 4,
+    },
+    paywallMainIcon: {
+      width: moderateScale(34),
+      height: moderateScale(34),
+      resizeMode: 'contain',
+    },
+    paywallTitle: {
+      color: '#1a3a4a',
+      fontSize: responsiveFont(isShortScreen ? 24 : 26, 21, 30),
+      lineHeight: responsiveFont(isShortScreen ? 30 : 34, 27, 38),
+      fontWeight: '700',
+      textAlign: 'center',
+      marginBottom: vh(1.4),
+    },
+    paywallSubtitle: {
+      color: '#2e5060',
+      fontSize: responsiveFont(15, 13, 17),
+      lineHeight: responsiveFont(22, 18, 25),
+      fontWeight: '400',
+      textAlign: 'center',
+      marginBottom: vh(2.4),
+      paddingHorizontal: vw(2),
+    },
+    paywallInfoCard: {
+      width: '100%',
+      backgroundColor: '#ffffff',
+      borderRadius: moderateScale(16),
+      padding: moderateScale(16),
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      marginBottom: vh(1.4),
+      shadowColor: '#000000',
+      shadowOpacity: 0.06,
+      shadowRadius: 6,
+      shadowOffset: { width: 0, height: 2 },
+      elevation: 2,
+    },
+    paywallInfoIconImage: {
+      width: moderateScale(24),
+      height: moderateScale(24),
+      resizeMode: 'contain',
+      marginRight: moderateScale(12),
+      marginTop: moderateScale(2),
+    },
+    paywallInfoContent: {
+      flex: 1,
+    },
+    paywallInfoTitle: {
+      color: '#1a1a1a',
+      fontSize: responsiveFont(15, 13, 17),
+      lineHeight: responsiveFont(20, 17, 22),
+      fontWeight: '600',
+      marginBottom: moderateScale(3),
+    },
+    paywallInfoBody: {
+      color: '#555555',
+      fontSize: responsiveFont(14, 12, 16),
+      lineHeight: responsiveFont(19, 16, 22),
+      fontWeight: '400',
+    },
+    paywallUpgradeButton: {
+      backgroundColor: '#22898e',
+      borderRadius: 999,
+      minHeight: moderateScale(54),
+      width: '100%',
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginTop: vh(1.4),
+      marginBottom: vh(1.8),
+      shadowColor: '#000000',
+      shadowOpacity: 0.15,
+      shadowRadius: 8,
+      shadowOffset: { width: 0, height: 4 },
+      elevation: 4,
+    },
+    paywallUpgradeWrap: {
+      width: '100%',
+      alignItems: 'center',
+      marginTop: vh(1.4),
+      marginBottom: vh(1.8),
+    },
+    paywallPriceText: {
+      marginTop: vh(0.8),
+      color: '#1f4048',
+      fontSize: responsiveFont(14, 12, 16),
+      lineHeight: responsiveFont(18, 15, 20),
+      fontWeight: '600',
+    },
+    paywallUpgradeText: {
+      color: '#ffffff',
+      fontSize: responsiveFont(18, 15, 20),
+      lineHeight: responsiveFont(22, 18, 24),
+      fontWeight: '600',
+    },
+    paywallMaybeLaterText: {
+      color: '#2e5060',
+      fontSize: responsiveFont(16, 14, 18),
+      lineHeight: responsiveFont(20, 17, 22),
+      fontWeight: '400',
+      textDecorationLine: 'underline',
+    },
+
+    // -------------------------------------------------------------------------
+    // Interstitial ad placeholder styles
+    // -------------------------------------------------------------------------
+    interstitialBackdrop: {
+      flex: 1,
+      backgroundColor: 'rgba(0,0,0,0.80)',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    interstitialCard: {
+      width: vw(88),
+      maxWidth: 380,
+      backgroundColor: '#ffffff',
+      borderRadius: moderateScale(20),
+      paddingHorizontal: vw(6),
+      paddingTop: vh(2.5),
+      paddingBottom: vh(2.5),
+      alignItems: 'center',
+    },
+    interstitialLabel: {
+      color: '#888888',
+      fontSize: responsiveFont(12, 10, 14),
+      lineHeight: responsiveFont(16, 13, 18),
+      fontWeight: '400',
+      letterSpacing: 1,
+      textTransform: 'uppercase',
+      marginBottom: vh(1.2),
+    },
+    interstitialAdPlaceholder: {
+      width: '100%',
+      height: moderateScale(200),
+      backgroundColor: '#e8e8e8',
+      borderRadius: moderateScale(12),
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginBottom: vh(2),
+    },
+    interstitialAdPlaceholderText: {
+      color: '#aaaaaa',
+      fontSize: responsiveFont(14, 12, 16),
+      fontWeight: '400',
+    },
+    interstitialContinueButton: {
+      backgroundColor: '#2eb8c6',
+      borderRadius: 999,
+      minHeight: moderateScale(48),
+      paddingHorizontal: vw(10),
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    interstitialContinueText: {
+      color: '#ffffff',
+      fontSize: responsiveFont(16, 14, 18),
+      lineHeight: responsiveFont(20, 17, 22),
+      fontWeight: '500',
     },
   }));
 }
