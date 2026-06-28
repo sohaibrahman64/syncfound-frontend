@@ -1,5 +1,17 @@
-const API_BASE_URL =
-  process.env.EXPO_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
+import { BASE_URL } from "./Constants";
+
+function normalizeApiBaseUrl(value) {
+  const text = String(value || "")
+    .trim()
+    .replace(/^['\"]|['\"]$/g, "")
+    .replace(/\/$/, "");
+
+  return text;
+}
+
+const API_BASE_URL = normalizeApiBaseUrl(
+  process.env.EXPO_PUBLIC_API_BASE_URL || BASE_URL,
+);
 const FIREBASE_LOGIN_PATH = "/auth/firebase-login";
 const FIREBASE_SIGNIN_PATH = "/auth/firebase-signin";
 const USER_EMAIL_UPDATE_PATH = "/users/me/email";

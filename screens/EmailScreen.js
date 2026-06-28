@@ -7,6 +7,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useResponsiveMetrics } from '../utils/responsive';
 import { withPlatformFontStyles } from '../utils/typography';
 
@@ -33,7 +34,11 @@ export default function EmailScreen({
   const emailInputRef = useRef(null);
 
   const metrics = useResponsiveMetrics();
-  const styles = useMemo(() => createStyles(metrics, isInputFocused), [metrics, isInputFocused]);
+  const insets = useSafeAreaInsets();
+  const styles = useMemo(
+    () => createStyles(metrics, insets.top, isInputFocused),
+    [metrics, insets.top, isInputFocused],
+  );
 
   const normalizedEmail = email.trim();
   const isEmailValid = isValidEmail(email);
@@ -128,7 +133,7 @@ export default function EmailScreen({
   );
 }
 
-function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }, isInputFocused) {
+function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }, topInset = 0, isInputFocused) {
   const isShortScreen = height < 760;
   const isNarrowScreen = width < 360;
 
@@ -140,7 +145,7 @@ function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }, 
     content: {
       flex: 1,
       paddingHorizontal: vw(6),
-      paddingTop: isShortScreen ? vh(7.2) : vh(8.6),
+      paddingTop: topInset + (isShortScreen ? vh(2.8) : vh(3.4)),
       paddingBottom: vh(4.8),
     },
     headerWrap: {

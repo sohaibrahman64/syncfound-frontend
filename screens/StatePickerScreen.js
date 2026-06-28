@@ -10,6 +10,7 @@ import {
   View,
   FlatList,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BASE_URL } from '../utils/Constants';
 import { useResponsiveMetrics } from '../utils/responsive';
 import { withPlatformFontStyles } from '../utils/typography';
@@ -73,7 +74,8 @@ export default function StatePickerScreen({
   const [searchText, setSearchText] = useState('');
 
   const metrics = useResponsiveMetrics();
-  const styles = useMemo(() => createStyles(metrics), [metrics]);
+  const insets = useSafeAreaInsets();
+  const styles = useMemo(() => createStyles(metrics, insets.top), [metrics, insets.top]);
 
   useEffect(() => {
     let isMounted = true;
@@ -199,7 +201,7 @@ export default function StatePickerScreen({
   );
 }
 
-function createStyles({ width, height, vw, vh, responsiveFont }) {
+function createStyles({ width, height, vw, vh, responsiveFont }, topInset = 0) {
   const isShortScreen = height < 760;
   const isNarrowScreen = width < 360;
 
@@ -211,7 +213,7 @@ function createStyles({ width, height, vw, vh, responsiveFont }) {
     content: {
       flex: 1,
       paddingHorizontal: vw(6),
-      paddingTop: isShortScreen ? vh(1.5) : vh(2),
+      paddingTop: topInset + (isShortScreen ? vh(1.6) : vh(2)),
       paddingBottom: vh(1.5),
     },
     backButton: {

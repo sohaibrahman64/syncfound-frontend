@@ -8,6 +8,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useResponsiveMetrics } from '../utils/responsive';
 import { withPlatformFontStyles } from '../utils/typography';
 
@@ -23,7 +24,8 @@ export default function ProfileNameScreen({
   const [isLastNameFocused, setIsLastNameFocused] = useState(false);
 
   const metrics = useResponsiveMetrics();
-  const styles = useMemo(() => createStyles(metrics), [metrics]);
+  const insets = useSafeAreaInsets();
+  const styles = useMemo(() => createStyles(metrics, insets), [metrics, insets.top, insets.bottom]);
 
   const canContinue = firstName.trim().length > 0;
 
@@ -95,9 +97,11 @@ export default function ProfileNameScreen({
   );
 }
 
-function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }) {
+function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }, insets = {}) {
   const isShortScreen = height < 760;
   const isNarrowScreen = width < 360;
+  const topInset = insets?.top || 0;
+  const bottomInset = insets?.bottom || 0;
 
   return StyleSheet.create(withPlatformFontStyles({
     container: {
@@ -116,7 +120,7 @@ function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }) 
     content: {
       flex: 1,
       paddingHorizontal: vw(6),
-      paddingTop: isShortScreen ? vh(3.2) : vh(4.2),
+      paddingTop: topInset + (isShortScreen ? vh(1.4) : vh(2)),
       paddingBottom: vh(4),
     },
     backButton: {
@@ -173,7 +177,7 @@ function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }) 
       alignItems: 'center',
       justifyContent: 'center',
       paddingHorizontal: vw(4),
-      marginBottom: vh(0.8),
+      marginBottom: bottomInset + vh(0.8),
     },
     continueButtonDisabled: {
       backgroundColor: '#cdcdcf',

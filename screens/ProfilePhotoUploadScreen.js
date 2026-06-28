@@ -9,6 +9,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import { removeProfileImage, uploadProfileImage } from '../utils/backendAuth';
 import { useResponsiveMetrics } from '../utils/responsive';
@@ -88,7 +89,8 @@ export default function ProfilePhotoUploadScreen({
   initialProfileImageCropRect = null,
 }) {
   const metrics = useResponsiveMetrics();
-  const styles = useMemo(() => createStyles(metrics), [metrics]);
+  const insets = useSafeAreaInsets();
+  const styles = useMemo(() => createStyles(metrics, insets), [metrics, insets.top, insets.bottom]);
   const [isDrawerVisible, setIsDrawerVisible] = useState(false);
   const [selectedImageUri, setSelectedImageUri] = useState(initialProfileImageUri);
   const [selectedImageSource, setSelectedImageSource] = useState(initialProfileImageSource);
@@ -556,9 +558,11 @@ export default function ProfilePhotoUploadScreen({
   );
 }
 
-function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }) {
+function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }, insets = {}) {
   const isShortScreen = height < 760;
   const isNarrowScreen = width < 360;
+  const topInset = insets?.top || 0;
+  const bottomInset = insets?.bottom || 0;
 
   return StyleSheet.create(withPlatformFontStyles({
     container: {
@@ -577,7 +581,7 @@ function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }) 
     content: {
       flex: 1,
       paddingHorizontal: vw(5),
-      paddingTop: isShortScreen ? vh(3.2) : vh(4.2),
+      paddingTop: topInset + (isShortScreen ? vh(1.4) : vh(2)),
       paddingBottom: vh(3.2),
     },
     backButton: {
@@ -685,7 +689,7 @@ function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }) 
       alignItems: 'center',
       justifyContent: 'center',
       paddingHorizontal: vw(4),
-      marginBottom: vh(0.6),
+      marginBottom: bottomInset + vh(0.6),
     },
     continueButtonDisabled: {
       backgroundColor: '#cdcdcf',

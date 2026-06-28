@@ -39,6 +39,7 @@ function loadEnvFile(envPath) {
 const projectRoot = path.resolve(__dirname, '..');
 const envPath = path.join(projectRoot, '.env');
 const googleServicesPath = path.join(projectRoot, 'google-services.json');
+const androidGoogleServicesPath = path.join(projectRoot, 'android', 'app', 'google-services.json');
 const placeholder = '__FIREBASE_ANDROID_API_KEY__';
 
 loadEnvFile(envPath);
@@ -62,5 +63,7 @@ if (!rawGoogleServices.includes(placeholder) && !rawGoogleServices.includes(fire
 
 const nextGoogleServices = rawGoogleServices.replaceAll(placeholder, firebaseAndroidApiKey);
 fs.writeFileSync(googleServicesPath, nextGoogleServices, 'utf8');
+fs.mkdirSync(path.dirname(androidGoogleServicesPath), { recursive: true });
+fs.writeFileSync(androidGoogleServicesPath, nextGoogleServices, 'utf8');
 
-console.log('Injected FIREBASE_ANDROID_API_KEY into google-services.json');
+console.log('Injected FIREBASE_ANDROID_API_KEY and synced android/app/google-services.json');

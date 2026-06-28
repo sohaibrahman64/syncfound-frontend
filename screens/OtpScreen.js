@@ -8,6 +8,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useResponsiveMetrics } from '../utils/responsive';
 import { sendOtp } from '../utils/firebaseAuth';
 import { withPlatformFontStyles } from '../utils/typography';
@@ -41,7 +42,8 @@ export default function OtpScreen({
   const hasAutoSubmittedRef = useRef(false);
 
   const metrics = useResponsiveMetrics();
-  const styles = useMemo(() => createStyles(metrics), [metrics]);
+  const insets = useSafeAreaInsets();
+  const styles = useMemo(() => createStyles(metrics, insets.top), [metrics, insets.top]);
 
   useEffect(() => {
     if (secondsLeft <= 0) {
@@ -236,7 +238,7 @@ export default function OtpScreen({
   );
 }
 
-function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }) {
+function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }, topInset = 0) {
   const isShortScreen = height < 760;
   const isNarrowScreen = width < 360;
 
@@ -248,7 +250,7 @@ function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }) 
     content: {
       flex: 1,
       paddingHorizontal: vw(6),
-      paddingTop: isShortScreen ? vh(1.6) : vh(2.2),
+      paddingTop: topInset + (isShortScreen ? vh(1.4) : vh(2)),
       paddingBottom: vh(4),
     },
     backButton: {

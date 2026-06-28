@@ -8,6 +8,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useResponsiveMetrics } from '../utils/responsive';
 import { withPlatformFontStyles } from '../utils/typography';
 
@@ -70,7 +71,8 @@ export default function ProfileEditPictureScreen({
   initialCropRect = null,
 }) {
   const metrics = useResponsiveMetrics();
-  const styles = useMemo(() => createStyles(metrics), [metrics]);
+  const insets = useSafeAreaInsets();
+  const styles = useMemo(() => createStyles(metrics, insets), [metrics, insets.top, insets.bottom]);
   const frameSize = Math.min(metrics.width, metrics.height) * 0.9;
 
   function clampTranslation(value, forScale) {
@@ -446,9 +448,11 @@ export default function ProfileEditPictureScreen({
   );
 }
 
-function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }) {
+function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }, insets = {}) {
   const isShortScreen = height < 760;
   const frameSize = Math.min(width, height) * 0.9;
+  const topInset = insets?.top || 0;
+  const bottomInset = insets?.bottom || 0;
 
   return StyleSheet.create(withPlatformFontStyles({
     container: {
@@ -460,7 +464,8 @@ function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }) 
       alignItems: 'center',
       justifyContent: 'space-between',
       paddingHorizontal: vw(4),
-      paddingVertical: vh(1.4),
+      paddingTop: topInset + vh(0.8),
+      paddingBottom: vh(1.2),
       borderBottomWidth: 1,
       borderBottomColor: '#d9d9d9',
       backgroundColor: '#efefef',
@@ -637,7 +642,7 @@ function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }) 
       alignItems: 'center',
       justifyContent: 'space-evenly',
       paddingTop: vh(1.6),
-      paddingBottom: vh(2.2),
+      paddingBottom: bottomInset + vh(1.2),
       minHeight: moderateScale(102),
     },
     toolButton: {

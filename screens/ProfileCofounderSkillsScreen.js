@@ -9,6 +9,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BASE_URL } from '../utils/Constants';
 import { useResponsiveMetrics } from '../utils/responsive';
 import { withPlatformFontStyles } from '../utils/typography';
@@ -68,7 +69,8 @@ export default function ProfileCofounderSkillsScreen({
   initialCofounderSkills = [],
 }) {
   const metrics = useResponsiveMetrics();
-  const styles = useMemo(() => createStyles(metrics), [metrics]);
+  const insets = useSafeAreaInsets();
+  const styles = useMemo(() => createStyles(metrics, insets), [metrics, insets.top, insets.bottom]);
   const [selectedSkills, setSelectedSkills] = useState(() => normalizeInitialSkills(initialCofounderSkills));
   const [skillOptions, setSkillOptions] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -207,9 +209,11 @@ export default function ProfileCofounderSkillsScreen({
   );
 }
 
-function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }) {
+function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }, insets = {}) {
   const isShortScreen = height < 760;
   const isNarrowScreen = width < 360;
+  const topInset = insets?.top || 0;
+  const bottomInset = insets?.bottom || 0;
 
   return StyleSheet.create(withPlatformFontStyles({
     container: {
@@ -228,7 +232,7 @@ function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }) 
     content: {
       flex: 1,
       paddingHorizontal: vw(5),
-      paddingTop: isShortScreen ? vh(3.2) : vh(4.2),
+      paddingTop: topInset + (isShortScreen ? vh(1.4) : vh(2)),
       paddingBottom: vh(3.2),
     },
     backButton: {
@@ -327,7 +331,7 @@ function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }) 
       justifyContent: 'center',
       paddingHorizontal: vw(4),
       marginTop: vh(1.2),
-      marginBottom: vh(0.6),
+      marginBottom: bottomInset + vh(0.6),
     },
     continueButtonDisabled: {
       backgroundColor: '#cdcdcf',

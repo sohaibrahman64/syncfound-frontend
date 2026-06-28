@@ -8,6 +8,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useResponsiveMetrics } from '../utils/responsive';
 import { withPlatformFontStyles } from '../utils/typography';
 
@@ -29,7 +30,11 @@ export default function PhoneNumberScreen({
   const [phoneInputFocused, setPhoneInputFocused] = useState(false);
 
   const metrics = useResponsiveMetrics();
-  const styles = React.useMemo(() => createStyles(metrics, phoneInputFocused), [metrics, phoneInputFocused]);
+  const insets = useSafeAreaInsets();
+  const styles = React.useMemo(
+    () => createStyles(metrics, insets.top, phoneInputFocused),
+    [metrics, insets.top, phoneInputFocused],
+  );
 
   const normalizedPhone = phoneNumber.replace(/\D/g, '');
   const isPhoneValid = normalizedPhone.length >= 7 && normalizedPhone.length <= 15;
@@ -113,7 +118,7 @@ export default function PhoneNumberScreen({
   );
 }
 
-function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }, phoneInputFocused = false) {
+function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }, topInset = 0, phoneInputFocused = false) {
   const isShortScreen = height < 760;
 
   // Only show bottom border when focused, hide others
@@ -141,7 +146,7 @@ function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }, 
     content: {
       flex: 1,
       paddingHorizontal: vw(5.2),
-      paddingTop: isShortScreen ? vh(5) : vh(12),
+      paddingTop: topInset + (isShortScreen ? vh(2.8) : vh(3.6)),
       paddingBottom: vh(4),
       justifyContent: 'flex-start',
     },
