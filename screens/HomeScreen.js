@@ -27,6 +27,7 @@ import {
   processActionResponse,
   shouldShowFallbackAd,
 } from '../utils/swipeMonetization';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { withPlatformFontStyles } from '../utils/typography';
 
 const PAGE_LIMIT = 20;
@@ -279,7 +280,8 @@ function DiscoverListItem({ card, styles, onPress }) {
 
 export default function HomeScreen({ firebaseToken = '', onAuthExpired }) {
   const metrics = useResponsiveMetrics();
-  const styles = useMemo(() => createStyles(metrics), [metrics]);
+  const insets = useSafeAreaInsets();
+  const styles = useMemo(() => createStyles(metrics, insets), [metrics, insets.top, insets.bottom]);
   const swipePosition = useRef(new Animated.ValueXY()).current;
 
   const [mode, setMode] = useState(MODE_MATCHMAKING);
@@ -1085,16 +1087,18 @@ export default function HomeScreen({ firebaseToken = '', onAuthExpired }) {
   );
 }
 
-function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }) {
+function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }, insets = {}) {
   const isShortScreen = height < 760;
   const isNarrowScreen = width < 360;
+  const topInset = insets?.top || 0;
+  const bottomInset = insets?.bottom || 0;
 
   return StyleSheet.create(withPlatformFontStyles({
     container: {
       flex: 1,
       backgroundColor: '#dfddd5',
-      paddingTop: isShortScreen ? vh(1.4) : vh(2.2),
-      paddingBottom: moderateScale(96),
+      paddingTop: topInset + (isShortScreen ? vh(1.2) : vh(1.8)),
+      paddingBottom: moderateScale(96) + bottomInset,
     },
     headerWrap: {
       flexDirection: 'row',
@@ -1435,14 +1439,14 @@ function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }) 
       position: 'absolute',
       left: 0,
       right: 0,
-      bottom: 0,
+      bottom: bottomInset + vh(0.6),
       width: '100%',
-      minHeight: moderateScale(78),
+      minHeight: moderateScale(66),
       flexDirection: 'row',
       borderTopWidth: StyleSheet.hairlineWidth,
       borderTopColor: '#e0e0e0',
       paddingTop: vh(0.8),
-      paddingBottom: vh(1.4),
+      paddingBottom: Math.min(bottomInset, moderateScale(6)) + vh(0.35),
       paddingHorizontal: vw(2),
       backgroundColor: '#ffffff',
       zIndex: 4,

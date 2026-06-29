@@ -43,7 +43,7 @@ export default function OtpScreen({
 
   const metrics = useResponsiveMetrics();
   const insets = useSafeAreaInsets();
-  const styles = useMemo(() => createStyles(metrics, insets.top), [metrics, insets.top]);
+  const styles = useMemo(() => createStyles(metrics, insets.top, insets.bottom), [metrics, insets.top, insets.bottom]);
 
   useEffect(() => {
     if (secondsLeft <= 0) {
@@ -238,7 +238,7 @@ export default function OtpScreen({
   );
 }
 
-function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }, topInset = 0) {
+function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }, topInset = 0, bottomInset = 0) {
   const isShortScreen = height < 760;
   const isNarrowScreen = width < 360;
 
@@ -269,6 +269,7 @@ function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }, 
       lineHeight: responsiveFont(isShortScreen ? 38 : 44, 33, 50),
       fontWeight: '700',
       color: '#000000',
+      marginTop: vh(1.2),
       marginBottom: vh(1),
     },
     phoneText: {
@@ -341,6 +342,7 @@ function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }, 
     },
     continueButton: {
       marginTop: 'auto',
+      marginBottom: bottomInset + vh(1.2),
       borderRadius: 999,
       backgroundColor: '#31c6d5',
       minHeight: moderateScale(isShortScreen ? 54 : 62),

@@ -19,12 +19,18 @@ const USER_PROFILE_PATH =
   process.env.EXPO_PUBLIC_USER_PROFILE_PATH || "/users/me/profile";
 const LINKEDIN_INGEST_PATH =
   process.env.EXPO_PUBLIC_LINKEDIN_INGEST_PATH || "/linkedin-profile/ingest";
-const INDUSTRIES_PATH = process.env.EXPO_PUBLIC_INDUSTRIES_PATH || "/industries";
-const USER_MATCHES_PATH = process.env.EXPO_PUBLIC_USER_MATCHES_PATH || "/users/me/matches";
-const USER_ENTITLEMENTS_PATH = process.env.EXPO_PUBLIC_USER_ENTITLEMENTS_PATH || "/users/me/entitlements";
-const PRICING_PLANS_PATH = process.env.EXPO_PUBLIC_PRICING_PLANS_PATH || "/pricing/plans";
-const IMAGE_UPLOAD_PATH = process.env.EXPO_PUBLIC_IMAGE_UPLOAD_PATH || "/images/upload";
-const IMAGE_REMOVE_PATH = process.env.EXPO_PUBLIC_IMAGE_REMOVE_PATH || "/images/remove";
+const INDUSTRIES_PATH =
+  process.env.EXPO_PUBLIC_INDUSTRIES_PATH || "/industries";
+const USER_MATCHES_PATH =
+  process.env.EXPO_PUBLIC_USER_MATCHES_PATH || "/users/me/matches";
+const USER_ENTITLEMENTS_PATH =
+  process.env.EXPO_PUBLIC_USER_ENTITLEMENTS_PATH || "/users/me/entitlements";
+const PRICING_PLANS_PATH =
+  process.env.EXPO_PUBLIC_PRICING_PLANS_PATH || "/pricing/plans";
+const IMAGE_UPLOAD_PATH =
+  process.env.EXPO_PUBLIC_IMAGE_UPLOAD_PATH || "/images/upload";
+const IMAGE_REMOVE_PATH =
+  process.env.EXPO_PUBLIC_IMAGE_REMOVE_PATH || "/images/remove";
 
 function buildUploadFileName(contentType) {
   const normalizedType = String(contentType || "image/jpeg").toLowerCase();
@@ -176,7 +182,11 @@ export async function submitUserProfile(profileData, firebaseToken) {
   return payload;
 }
 
-export async function ingestLinkedinProfile(linkedinPayload, userId, firebaseToken = "") {
+export async function ingestLinkedinProfile(
+  linkedinPayload,
+  userId,
+  firebaseToken = "",
+) {
   const numericUserId = Number(userId);
   if (!Number.isFinite(numericUserId) || numericUserId <= 0) {
     throw new Error("Could not determine user id for LinkedIn profile ingest.");
@@ -287,7 +297,7 @@ function normalizeMatchesPayload(payload) {
     };
   }
 
-  if (payload && typeof payload === 'object' && payload?.candidate_id != null) {
+  if (payload && typeof payload === "object" && payload?.candidate_id != null) {
     return {
       items: [payload],
       nextCursor: payload?.next_cursor ?? payload?.nextCursor ?? null,
@@ -303,36 +313,42 @@ function normalizeMatchesPayload(payload) {
 export async function getMyMatches({
   firebaseToken,
   getFirebaseToken,
-  mode = 'matchmaking',
+  mode = "matchmaking",
   limit = 20,
   cursor = null,
   refresh = false,
 } = {}) {
   const queryParams = new URLSearchParams();
-  queryParams.set('mode', mode === 'discover' ? 'discover' : 'matchmaking');
-  queryParams.set('limit', String(Math.min(Math.max(Number(limit) || 20, 1), 100)));
+  queryParams.set("mode", mode === "discover" ? "discover" : "matchmaking");
+  queryParams.set(
+    "limit",
+    String(Math.min(Math.max(Number(limit) || 20, 1), 100)),
+  );
 
   if (cursor) {
-    queryParams.set('cursor', String(cursor));
+    queryParams.set("cursor", String(cursor));
   }
 
   if (refresh) {
-    queryParams.set('refresh', 'true');
+    queryParams.set("refresh", "true");
   }
 
   async function requestMatches(token) {
     const headers = {
-      'Content-Type': 'application/json',
+      "Content-Type": "application/json",
     };
 
     if (token) {
       headers.Authorization = `Bearer ${token}`;
     }
 
-    const response = await fetch(`${API_BASE_URL}${USER_MATCHES_PATH}?${queryParams.toString()}`, {
-      method: 'GET',
-      headers,
-    });
+    const response = await fetch(
+      `${API_BASE_URL}${USER_MATCHES_PATH}?${queryParams.toString()}`,
+      {
+        method: "GET",
+        headers,
+      },
+    );
 
     let payload = null;
     try {
@@ -344,15 +360,15 @@ export async function getMyMatches({
     return { response, payload };
   }
 
-  let token = firebaseToken || '';
+  let token = firebaseToken || "";
 
-  if (typeof getFirebaseToken === 'function') {
+  if (typeof getFirebaseToken === "function") {
     token = await getFirebaseToken(false);
   }
 
   let { response, payload } = await requestMatches(token);
 
-  if (response.status === 401 && typeof getFirebaseToken === 'function') {
+  if (response.status === 401 && typeof getFirebaseToken === "function") {
     const refreshedToken = await getFirebaseToken(true);
     ({ response, payload } = await requestMatches(refreshedToken));
   }
@@ -375,15 +391,15 @@ export async function postMatchAction({
   firebaseToken,
   candidateId,
   action,
-  connectionMessage = '',
-  requestId = '',
+  connectionMessage = "",
+  requestId = "",
 } = {}) {
   if (!candidateId) {
-    throw new Error('candidateId is required for match action.');
+    throw new Error("candidateId is required for match action.");
   }
 
   const headers = {
-    'Content-Type': 'application/json',
+    "Content-Type": "application/json",
   };
 
   if (firebaseToken) {
@@ -391,15 +407,15 @@ export async function postMatchAction({
   }
 
   const body = {
-    action: String(action || '').trim(),
+    action: String(action || "").trim(),
   };
 
-  const trimmedMessage = String(connectionMessage || '').trim();
+  const trimmedMessage = String(connectionMessage || "").trim();
   if (trimmedMessage) {
     body.connection_message = trimmedMessage;
   }
 
-  const trimmedRequestId = String(requestId || '').trim();
+  const trimmedRequestId = String(requestId || "").trim();
   if (trimmedRequestId) {
     body.request_id = trimmedRequestId;
   }
@@ -407,7 +423,7 @@ export async function postMatchAction({
   const response = await fetch(
     `${API_BASE_URL}${USER_MATCHES_PATH}/${encodeURIComponent(candidateId)}/actions`,
     {
-      method: 'POST',
+      method: "POST",
       headers,
       body: JSON.stringify(body),
     },
@@ -434,9 +450,9 @@ export async function postMatchAction({
   return payload;
 }
 
-export async function getEntitlements(firebaseToken = '') {
+export async function getEntitlements(firebaseToken = "") {
   const headers = {
-    'Content-Type': 'application/json',
+    "Content-Type": "application/json",
   };
 
   if (firebaseToken) {
@@ -444,7 +460,7 @@ export async function getEntitlements(firebaseToken = '') {
   }
 
   const response = await fetch(`${API_BASE_URL}${USER_ENTITLEMENTS_PATH}`, {
-    method: 'GET',
+    method: "GET",
     headers,
   });
 
@@ -469,9 +485,9 @@ export async function getEntitlements(firebaseToken = '') {
   return payload;
 }
 
-export async function getPricingPlans(firebaseToken = '') {
+export async function getPricingPlans(firebaseToken = "") {
   const headers = {
-    'Content-Type': 'application/json',
+    "Content-Type": "application/json",
   };
 
   if (firebaseToken) {
@@ -479,7 +495,7 @@ export async function getPricingPlans(firebaseToken = '') {
   }
 
   const response = await fetch(`${API_BASE_URL}${PRICING_PLANS_PATH}`, {
-    method: 'GET',
+    method: "GET",
     headers,
   });
 
@@ -658,4 +674,3 @@ export async function signInWithFirebaseToken(idToken, phone_number) {
 
   return payload;
 }
-

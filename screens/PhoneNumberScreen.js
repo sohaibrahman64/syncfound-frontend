@@ -32,8 +32,8 @@ export default function PhoneNumberScreen({
   const metrics = useResponsiveMetrics();
   const insets = useSafeAreaInsets();
   const styles = React.useMemo(
-    () => createStyles(metrics, insets.top, phoneInputFocused),
-    [metrics, insets.top, phoneInputFocused],
+    () => createStyles(metrics, insets.top, insets.bottom, phoneInputFocused),
+    [metrics, insets.top, insets.bottom, phoneInputFocused],
   );
 
   const normalizedPhone = phoneNumber.replace(/\D/g, '');
@@ -118,7 +118,12 @@ export default function PhoneNumberScreen({
   );
 }
 
-function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }, topInset = 0, phoneInputFocused = false) {
+function createStyles(
+  { width, height, vw, vh, moderateScale, responsiveFont },
+  topInset = 0,
+  bottomInset = 0,
+  phoneInputFocused = false,
+) {
   const isShortScreen = height < 760;
 
   // Only show bottom border when focused, hide others
@@ -151,6 +156,7 @@ function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }, 
       justifyContent: 'flex-start',
     },
     headerWrap: {
+      marginTop: vh(1.2),
       marginBottom: isShortScreen ? vh(10.2) : vh(12.2),
     },
     heading: {
@@ -215,6 +221,7 @@ function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }, 
     },
     continueButton: {
       marginTop: 'auto',
+      marginBottom: bottomInset + vh(1.2),
       borderRadius: 999,
       backgroundColor: '#31c6d5',
       minHeight: moderateScale(isShortScreen ? 54 : 62),

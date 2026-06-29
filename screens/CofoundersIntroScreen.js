@@ -8,6 +8,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useResponsiveMetrics } from '../utils/responsive';
 import { withPlatformFontStyles } from '../utils/typography';
 
@@ -15,7 +16,8 @@ export default function CofoundersIntroScreen({
   onNext,
 }) {
   const metrics = useResponsiveMetrics();
-  const styles = useMemo(() => createStyles(metrics), [metrics]);
+  const insets = useSafeAreaInsets();
+  const styles = useMemo(() => createStyles(metrics, insets.bottom), [metrics, insets.bottom]);
 
   return (
     <View style={styles.container}>
@@ -61,7 +63,7 @@ export default function CofoundersIntroScreen({
   );
 }
 
-function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }) {
+function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }, bottomInset = 0) {
   const isShortScreen = height < 760;
   const isNarrowScreen = width < 360;
 
@@ -137,7 +139,7 @@ function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }) 
       shadowRadius: 10,
       shadowOffset: { width: 0, height: 4 },
       elevation: 3,
-      marginBottom: isShortScreen ? vh(0.6) : vh(1.4),
+      marginBottom: bottomInset + (isShortScreen ? vh(0.6) : vh(1.4)),
     },
     nextButtonText: {
       color: '#ffffff',
