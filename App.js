@@ -10,7 +10,12 @@ import {
   useFonts,
 } from '@expo-google-fonts/plus-jakarta-sans';
 import { sendOtp, signOutFirebaseSession } from './utils/firebaseAuth';
-import { sendFirebaseIdTokenToBackend, signInWithFirebaseToken, updateUserEmailInBackend } from './utils/backendAuth';
+import {
+  deactivateDevicePushToken,
+  sendFirebaseIdTokenToBackend,
+  signInWithFirebaseToken,
+  updateUserEmailInBackend,
+} from './utils/backendAuth';
 import SyncFoundSplashScreen from './screens/SyncFoundSplashScreen';
 import PhoneNumberScreen from './screens/PhoneNumberScreen';
 import CountryPickerScreen from './screens/CountryPickerScreen';
@@ -67,6 +72,15 @@ export default function App() {
   const [emailUpdateError, setEmailUpdateError] = useState('');
 
   async function handleAuthExpired() {
+    const pushToken = String(process.env.EXPO_PUBLIC_DEVICE_PUSH_TOKEN || '').trim();
+
+    if (pushToken) {
+      await deactivateDevicePushToken({
+        firebaseToken,
+        token: pushToken,
+      }).catch(() => {});
+    }
+
     await signOutFirebaseSession().catch(() => {});
     await Promise.all([
       AsyncStorage.removeItem(SESSION_STORAGE_KEY),

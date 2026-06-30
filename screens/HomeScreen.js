@@ -29,10 +29,15 @@ import {
 } from '../utils/swipeMonetization';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { withPlatformFontStyles } from '../utils/typography';
+import InvitesScreen from './InvitesScreen';
 
 const PAGE_LIMIT = 20;
 const MODE_MATCHMAKING = 'matchmaking';
 const MODE_DISCOVER = 'discover';
+const TAB_INVITES = 'invites';
+const TAB_SYNC = 'sync';
+const TAB_CHAT = 'chat';
+const TAB_PROFILE = 'profile';
 
 function resolveFlagSource(countryCode) {
   const normalized = String(countryCode || '').trim().toLowerCase();
@@ -285,6 +290,7 @@ export default function HomeScreen({ firebaseToken = '', onAuthExpired }) {
   const swipePosition = useRef(new Animated.ValueXY()).current;
 
   const [mode, setMode] = useState(MODE_MATCHMAKING);
+  const [activeBottomTab, setActiveBottomTab] = useState(TAB_SYNC);
   const [cards, setCards] = useState([]);
   const [activeIndex, setActiveIndex] = useState(0);
   const [nextCursor, setNextCursor] = useState(null);
@@ -728,6 +734,25 @@ export default function HomeScreen({ firebaseToken = '', onAuthExpired }) {
     ],
   };
 
+  const handleNavigateBottomTab = useCallback((tabKey) => {
+    const normalized = String(tabKey || '').trim().toLowerCase();
+    if (!normalized) {
+      return;
+    }
+
+    setActiveBottomTab(normalized);
+  }, []);
+
+  if (activeBottomTab === TAB_INVITES) {
+    return (
+      <InvitesScreen
+        firebaseToken={firebaseToken}
+        onAuthExpired={onAuthExpired}
+        onNavigate={handleNavigateBottomTab}
+      />
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.headerWrap}>
@@ -840,25 +865,25 @@ export default function HomeScreen({ firebaseToken = '', onAuthExpired }) {
       ) : null}
 
       <View style={styles.bottomTabBar}>
-        <View style={styles.tabItem}>
+        <Pressable style={styles.tabItem} onPress={() => handleNavigateBottomTab(TAB_INVITES)}>
           <Image source={require('../assets/invites-inactive.png')} style={styles.tabIcon} />
           <Text style={styles.tabLabel}>Invites</Text>
-        </View>
+        </Pressable>
 
-        <View style={styles.tabItem}>
+        <Pressable style={styles.tabItem} onPress={() => handleNavigateBottomTab(TAB_SYNC)}>
           <Image source={require('../assets/sync-active.png')} style={styles.tabIcon} />
           <Text style={styles.tabLabelActive}>Sync</Text>
-        </View>
+        </Pressable>
 
-        <View style={styles.tabItem}>
+        <Pressable style={styles.tabItem} onPress={() => handleNavigateBottomTab(TAB_CHAT)}>
           <Image source={require('../assets/chat-inactive.png')} style={styles.tabIcon} />
           <Text style={styles.tabLabel}>Chat</Text>
-        </View>
+        </Pressable>
 
-        <View style={styles.tabItem}>
+        <Pressable style={styles.tabItem} onPress={() => handleNavigateBottomTab(TAB_PROFILE)}>
           <Image source={require('../assets/profile-inactive.png')} style={styles.tabIcon} />
           <Text style={styles.tabLabel}>Profile</Text>
-        </View>
+        </Pressable>
       </View>
 
       {isPaging ? (

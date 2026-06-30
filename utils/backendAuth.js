@@ -27,10 +27,103 @@ const USER_ENTITLEMENTS_PATH =
   process.env.EXPO_PUBLIC_USER_ENTITLEMENTS_PATH || "/users/me/entitlements";
 const PRICING_PLANS_PATH =
   process.env.EXPO_PUBLIC_PRICING_PLANS_PATH || "/pricing/plans";
+const RECEIVED_INVITES_PATH =
+  process.env.EXPO_PUBLIC_RECEIVED_INVITES_PATH || "/users/me/invites";
+const SENT_INVITES_PATH =
+  process.env.EXPO_PUBLIC_SENT_INVITES_PATH || "/users/me/invites/sent";
+const SAVED_PROFILES_PATH =
+  process.env.EXPO_PUBLIC_SAVED_PROFILES_PATH || "/users/me/saved";
+const PASSED_PROFILES_PATH =
+  process.env.EXPO_PUBLIC_PASSED_PROFILES_PATH || "/users/me/passed";
+const INVITES_COUNTS_PATH =
+  process.env.EXPO_PUBLIC_INVITES_COUNTS_PATH || "/users/me/invites/counts";
+const DEVICE_TOKENS_PATH =
+  process.env.EXPO_PUBLIC_DEVICE_TOKENS_PATH || "/users/me/device-tokens";
 const IMAGE_UPLOAD_PATH =
   process.env.EXPO_PUBLIC_IMAGE_UPLOAD_PATH || "/images/upload";
 const IMAGE_REMOVE_PATH =
   process.env.EXPO_PUBLIC_IMAGE_REMOVE_PATH || "/images/remove";
+
+function createAuthHeaders(firebaseToken = "") {
+  const headers = {
+    "Content-Type": "application/json",
+  };
+
+  if (firebaseToken) {
+    headers.Authorization = `Bearer ${firebaseToken}`;
+  }
+
+  return headers;
+}
+
+async function parseJsonResponse(response) {
+  try {
+    return await response.json();
+  } catch {
+    return null;
+  }
+}
+
+function createHttpError(response, payload, fallbackMessage) {
+  const error = new Error(
+    payload?.detail || payload?.message || fallbackMessage,
+  );
+  error.status = response.status;
+  error.payload = payload;
+  return error;
+}
+
+function normalizeListPayload(payload) {
+  return {
+    items: Array.isArray(payload?.items) ? payload.items : [],
+    nextCursor: payload?.next_cursor ?? payload?.nextCursor ?? null,
+    hasMore:
+      typeof payload?.has_more === "boolean"
+        ? payload.has_more
+        : typeof payload?.hasMore === "boolean"
+          ? payload.hasMore
+          : Boolean(payload?.next_cursor ?? payload?.nextCursor),
+  };
+}
+
+async function fetchPaginatedList({
+  firebaseToken = "",
+  path,
+  status,
+  limit = 20,
+  cursor = null,
+} = {}) {
+  const queryParams = new URLSearchParams();
+  queryParams.set(
+    "limit",
+    String(Math.min(Math.max(Number(limit) || 20, 1), 100)),
+  );
+
+  if (status) {
+    queryParams.set("status", String(status));
+  }
+
+  if (cursor) {
+    queryParams.set("cursor", String(cursor));
+  }
+
+  const response = await fetch(`${API_BASE_URL}${path}?${queryParams.toString()}`, {
+    method: "GET",
+    headers: createAuthHeaders(firebaseToken),
+  });
+
+  const payload = await parseJsonResponse(response);
+
+  if (!response.ok) {
+    throw createHttpError(
+      response,
+      payload,
+      `Request failed with status ${response.status}`,
+    );
+  }
+
+  return normalizeListPayload(payload || {});
+}
 
 function buildUploadFileName(contentType) {
   const normalizedType = String(contentType || "image/jpeg").toLowerCase();
@@ -526,6 +619,231 @@ export async function getPricingPlans(firebaseToken = "") {
   }
 
   return [];
+}
+
+export async function getReceivedInvites({
+  firebaseToken = "",
+  status = "pending",
+  limit = 20,
+  cursor = null,
+} = {}) {
+  return fetchPaginatedList({
+    firebaseToken,
+    path: RECEIVED_INVITES_PATH,
+    status,
+    limit,
+    cursor,
+  });
+}
+
+export async function getSentInvites({
+  firebaseToken = "",
+  status = "all",
+  limit = 20,
+  cursor = null,
+} = {}) {
+  return fetchPaginatedList({
+    firebaseToken,
+    path: SENT_INVITES_PATH,
+    status,
+    limit,
+    cursor,
+  });
+}
+
+export async function getSavedProfiles({
+  firebaseToken = "",
+  limit = 20,
+  cursor = null,
+} = {}) {
+  return fetchPaginatedList({
+    firebaseToken,
+    path: SAVED_PROFILES_PATH,
+    limit,
+    cursor,
+  });
+}
+
+export async function getPassedProfiles({
+  firebaseToken = "",
+  limit = 20,
+  cursor = null,
+} = {}) {
+  return fetchPaginatedList({
+    firebaseToken,
+    path: PASSED_PROFILES_PATH,
+    limit,
+    cursor,
+  });
+}
+
+export async function getInviteCounts({ firebaseToken = "" } = {}) {
+  const response = await fetch(`${API_BASE_URL}${INVITES_COUNTS_PATH}`, {
+    method: "GET",
+    headers: createAuthHeaders(firebaseToken),
+  });
+
+  const payload = await parseJsonResponse(response);
+
+  if (!response.ok) {
+    throw createHttpError(
+      response,
+      payload,
+      `Failed to fetch invite counts with status ${response.status}`,
+    );
+  }
+
+  return payload || {};
+}
+
+export async function mutateInvite({
+  firebaseToken = "",
+  inviteId,
+  action,
+  requestId,
+} = {}) {
+  if (!inviteId) {
+    throw new Error("inviteId is required.");
+  }
+
+  const body = {
+    action: String(action || "").trim(),
+  };
+
+  const normalizedRequestId = String(requestId || "").trim();
+  if (normalizedRequestId) {
+    body.request_id = normalizedRequestId;
+  }
+
+  const response = await fetch(
+    `${API_BASE_URL}${RECEIVED_INVITES_PATH}/${encodeURIComponent(inviteId)}`,
+    {
+      method: "PATCH",
+      headers: createAuthHeaders(firebaseToken),
+      body: JSON.stringify(body),
+    },
+  );
+
+  const payload = await parseJsonResponse(response);
+
+  if (!response.ok) {
+    throw createHttpError(
+      response,
+      payload,
+      `Failed to update invite with status ${response.status}`,
+    );
+  }
+
+  return payload;
+}
+
+export async function withdrawSentInvite({
+  firebaseToken = "",
+  inviteId,
+  requestId,
+} = {}) {
+  if (!inviteId) {
+    throw new Error("inviteId is required.");
+  }
+
+  const body = {};
+  const normalizedRequestId = String(requestId || "").trim();
+  if (normalizedRequestId) {
+    body.request_id = normalizedRequestId;
+  }
+
+  const response = await fetch(
+    `${API_BASE_URL}${RECEIVED_INVITES_PATH}/${encodeURIComponent(inviteId)}/withdraw`,
+    {
+      method: "POST",
+      headers: createAuthHeaders(firebaseToken),
+      body: JSON.stringify(body),
+    },
+  );
+
+  const payload = await parseJsonResponse(response);
+
+  if (!response.ok) {
+    throw createHttpError(
+      response,
+      payload,
+      `Failed to withdraw invite with status ${response.status}`,
+    );
+  }
+
+  return payload;
+}
+
+export async function registerDevicePushToken({
+  firebaseToken = "",
+  token,
+  provider,
+  platform,
+  device_id,
+  app_version,
+} = {}) {
+  const normalizedToken = String(token || "").trim();
+  if (!normalizedToken) {
+    return null;
+  }
+
+  const body = {
+    token: normalizedToken,
+    provider: String(provider || "fcm").trim() || "fcm",
+    platform: String(platform || "").trim(),
+    device_id: String(device_id || "").trim(),
+    app_version: String(app_version || "").trim(),
+  };
+
+  const response = await fetch(`${API_BASE_URL}${DEVICE_TOKENS_PATH}`, {
+    method: "PUT",
+    headers: createAuthHeaders(firebaseToken),
+    body: JSON.stringify(body),
+  });
+
+  const payload = await parseJsonResponse(response);
+
+  if (!response.ok) {
+    throw createHttpError(
+      response,
+      payload,
+      `Failed to register device token with status ${response.status}`,
+    );
+  }
+
+  return payload;
+}
+
+export async function deactivateDevicePushToken({
+  firebaseToken = "",
+  token,
+} = {}) {
+  const normalizedToken = String(token || "").trim();
+  if (!normalizedToken) {
+    return null;
+  }
+
+  const response = await fetch(`${API_BASE_URL}${DEVICE_TOKENS_PATH}`, {
+    method: "DELETE",
+    headers: createAuthHeaders(firebaseToken),
+    body: JSON.stringify({ token: normalizedToken }),
+  });
+
+  if (response.status === 204) {
+    return null;
+  }
+
+  const payload = await parseJsonResponse(response);
+
+  if (!response.ok) {
+    throw createHttpError(
+      response,
+      payload,
+      `Failed to deactivate device token with status ${response.status}`,
+    );
+  }
+
+  return payload;
 }
 
 export async function uploadProfileImage(imageUri, firebaseToken) {
