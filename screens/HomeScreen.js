@@ -17,8 +17,9 @@ import {
 } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
-import { getEntitlements, getMyMatches, getPricingPlans, postMatchAction } from '../utils/backendAuth';
+import { getEntitlements, getInviteCounts, getMyMatches, getPricingPlans, postMatchAction } from '../utils/backendAuth';
 import { getCurrentFirebaseIdToken } from '../utils/firebaseAuth';
+import { listChats } from '../utils/chatApi';
 import { FLAG_ASSET_MAP } from '../utils/flagAssetMap';
 import { useResponsiveMetrics } from '../utils/responsive';
 import {
@@ -30,6 +31,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { withPlatformFontStyles } from '../utils/typography';
 import InvitesScreen from './InvitesScreen';
+import ChatScreen from './ChatScreen';
 
 const PAGE_LIMIT = 20;
 const MODE_MATCHMAKING = 'matchmaking';
@@ -283,7 +285,7 @@ function DiscoverListItem({ card, styles, onPress }) {
   );
 }
 
-export default function HomeScreen({ firebaseToken = '', onAuthExpired }) {
+export default function HomeScreen({ firebaseToken = '', onAuthExpired, backendUserId = '' }) {
   const metrics = useResponsiveMetrics();
   const insets = useSafeAreaInsets();
   const styles = useMemo(() => createStyles(metrics, insets), [metrics, insets.top, insets.bottom]);
@@ -291,6 +293,12 @@ export default function HomeScreen({ firebaseToken = '', onAuthExpired }) {
 
   const [mode, setMode] = useState(MODE_MATCHMAKING);
   const [activeBottomTab, setActiveBottomTab] = useState(TAB_SYNC);
+  const [chatLaunchContext, setChatLaunchContext] = useState({
+    conversationId: '',
+    initialMessageId: '',
+  });
+  const [inviteUnreadCount, setInviteUnreadCount] = useState(0);
+  const [chatUnreadCount, setChatUnreadCount] = useState(0);
   const [cards, setCards] = useState([]);
   const [activeIndex, setActiveIndex] = useState(0);
   const [nextCursor, setNextCursor] = useState(null);
@@ -329,6 +337,92 @@ export default function HomeScreen({ firebaseToken = '', onAuthExpired }) {
   const actionTargetCard = mode === MODE_DISCOVER ? selectedDiscoverCard : currentCard;
 
   const swipeThreshold = Math.min(metrics.vw(22), 120);
+
+  const resolveInviteUnreadCount = useCallback((payload = {}) => {
+    const directCandidates = [
+      payload?.unread_count,
+      payload?.unread,
+      payload?.pending,
+      payload?.pending_count,
+      payload?.pending_invites,
+      payload?.received_pending,
+      payload?.invitations_unread,
+      payload?.invitations_pending,
+      payload?.invites_unread,
+      payload?.total,
+    ];
+
+    for (const candidate of directCandidates) {
+      const parsed = Number(candidate);
+      if (Number.isFinite(parsed) && parsed >= 0) {
+        return Math.floor(parsed);
+      }
+    }
+
+    if (payload && typeof payload === 'object') {
+      const nested = payload?.counts && typeof payload.counts === 'object' ? payload.counts : null;
+      const fromNested = nested
+        ? [
+          nested?.unread,
+          nested?.pending,
+          nested?.invitations,
+          nested?.received_pending,
+        ]
+        : [];
+
+      for (const candidate of fromNested) {
+        const parsed = Number(candidate);
+        if (Number.isFinite(parsed) && parsed >= 0) {
+          return Math.floor(parsed);
+        }
+      }
+    }
+
+    return 0;
+  }, []);
+
+  const fetchUnreadBadges = useCallback(async () => {
+    try {
+      const token = await getCurrentFirebaseIdToken(false).catch(() => firebaseToken);
+      const inviteResult = await getInviteCounts({ firebaseToken: token }).catch(() => ({}));
+      setInviteUnreadCount(resolveInviteUnreadCount(inviteResult));
+
+      let totalChatUnread = 0;
+      let cursor = null;
+      let hasMore = true;
+      let pageGuard = 0;
+
+      while (hasMore && pageGuard < 5) {
+        pageGuard += 1;
+        const chatPage = await listChats({
+          firebaseToken: token,
+          limit: 100,
+          cursor,
+        });
+
+        totalChatUnread += (chatPage?.items || []).reduce((sum, item) => {
+          const unread = Number(item?.unreadCount || 0);
+          return sum + (Number.isFinite(unread) && unread > 0 ? unread : 0);
+        }, 0);
+
+        hasMore = Boolean(chatPage?.hasMore);
+        cursor = chatPage?.nextCursor || null;
+        if (!cursor) {
+          break;
+        }
+      }
+
+      setChatUnreadCount(Math.max(0, Math.floor(totalChatUnread)));
+    } catch (error) {
+      const isAuthError =
+        error?.status === 401 ||
+        /invalid firebase token|unauthori[sz]ed|token/i.test(String(error?.message || ''));
+
+      if (isAuthError) {
+        onAuthExpired?.();
+      }
+    }
+  }, [firebaseToken, onAuthExpired, resolveInviteUnreadCount]);
 
   const loadMatches = useCallback(
     async ({ requestedMode = mode, cursor = null, refresh = false, append = false } = {}) => {
@@ -480,17 +574,25 @@ export default function HomeScreen({ firebaseToken = '', onAuthExpired }) {
   useEffect(() => {
     fetchEntitlements();
     fetchPricingPlans();
-  }, [fetchEntitlements]);
+    fetchUnreadBadges();
+  }, [fetchEntitlements, fetchPricingPlans, fetchUnreadBadges]);
 
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (nextState) => {
       if (nextState === 'active') {
         fetchEntitlements();
         fetchPricingPlans();
+        fetchUnreadBadges();
       }
     });
     return () => subscription.remove();
-  }, [fetchEntitlements]);
+  }, [fetchEntitlements, fetchPricingPlans, fetchUnreadBadges]);
+
+  useEffect(() => {
+    if (activeBottomTab === TAB_SYNC) {
+      fetchUnreadBadges();
+    }
+  }, [activeBottomTab, fetchUnreadBadges]);
 
   const premiumPlan = useMemo(
     () => pricingPlans.find((plan) => String(plan?.tier || '').toLowerCase() === 'premium') || null,
@@ -734,10 +836,21 @@ export default function HomeScreen({ firebaseToken = '', onAuthExpired }) {
     ],
   };
 
-  const handleNavigateBottomTab = useCallback((tabKey) => {
-    const normalized = String(tabKey || '').trim().toLowerCase();
+  const handleNavigateBottomTab = useCallback((tabOrPayload) => {
+    const payload = typeof tabOrPayload === 'string'
+      ? { tab: tabOrPayload }
+      : (tabOrPayload || {});
+
+    const normalized = String(payload?.tab || payload?.key || '').trim().toLowerCase();
     if (!normalized) {
       return;
+    }
+
+    if (normalized === TAB_CHAT) {
+      setChatLaunchContext({
+        conversationId: String(payload?.conversationId || '').trim(),
+        initialMessageId: String(payload?.initialMessageId || '').trim(),
+      });
     }
 
     setActiveBottomTab(normalized);
@@ -749,6 +862,19 @@ export default function HomeScreen({ firebaseToken = '', onAuthExpired }) {
         firebaseToken={firebaseToken}
         onAuthExpired={onAuthExpired}
         onNavigate={handleNavigateBottomTab}
+      />
+    );
+  }
+
+  if (activeBottomTab === TAB_CHAT) {
+    return (
+      <ChatScreen
+        onNavigate={handleNavigateBottomTab}
+        firebaseToken={firebaseToken}
+        onAuthExpired={onAuthExpired}
+        launchConversationId={chatLaunchContext.conversationId}
+        launchInitialMessageId={chatLaunchContext.initialMessageId}
+        currentUserId={String(backendUserId || '')}
       />
     );
   }
@@ -866,7 +992,14 @@ export default function HomeScreen({ firebaseToken = '', onAuthExpired }) {
 
       <View style={styles.bottomTabBar}>
         <Pressable style={styles.tabItem} onPress={() => handleNavigateBottomTab(TAB_INVITES)}>
-          <Image source={require('../assets/invites-inactive.png')} style={styles.tabIcon} />
+          <View style={styles.tabIconWrap}>
+            <Image source={require('../assets/invites-inactive.png')} style={styles.tabIcon} />
+            {inviteUnreadCount > 0 ? (
+              <View style={styles.tabBadgeWrap}>
+                <Text style={styles.tabBadgeText}>{inviteUnreadCount > 99 ? '99+' : String(inviteUnreadCount)}</Text>
+              </View>
+            ) : null}
+          </View>
           <Text style={styles.tabLabel}>Invites</Text>
         </Pressable>
 
@@ -876,7 +1009,14 @@ export default function HomeScreen({ firebaseToken = '', onAuthExpired }) {
         </Pressable>
 
         <Pressable style={styles.tabItem} onPress={() => handleNavigateBottomTab(TAB_CHAT)}>
-          <Image source={require('../assets/chat-inactive.png')} style={styles.tabIcon} />
+          <View style={styles.tabIconWrap}>
+            <Image source={require('../assets/chat-inactive.png')} style={styles.tabIcon} />
+            {chatUnreadCount > 0 ? (
+              <View style={styles.tabBadgeWrap}>
+                <Text style={styles.tabBadgeText}>{chatUnreadCount > 99 ? '99+' : String(chatUnreadCount)}</Text>
+              </View>
+            ) : null}
+          </View>
           <Text style={styles.tabLabel}>Chat</Text>
         </Pressable>
 
@@ -1486,6 +1626,29 @@ function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }, 
       width: moderateScale(32),
       height: moderateScale(32),
       resizeMode: 'contain',
+    },
+    tabIconWrap: {
+      position: 'relative',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    tabBadgeWrap: {
+      position: 'absolute',
+      top: -moderateScale(4),
+      right: -moderateScale(10),
+      minWidth: moderateScale(18),
+      height: moderateScale(18),
+      borderRadius: 999,
+      backgroundColor: '#2cbbc1',
+      paddingHorizontal: moderateScale(4),
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    tabBadgeText: {
+      color: '#ffffff',
+      fontSize: responsiveFont(10, 9, 11),
+      lineHeight: responsiveFont(12, 11, 13),
+      fontWeight: '600',
     },
     tabLabel: {
       marginTop: vh(0.2),

@@ -338,7 +338,11 @@ export default function App() {
   if (currentScreen === 'home') {
     return (
       <>
-        <HomeScreen firebaseToken={firebaseToken} onAuthExpired={handleAuthExpired} />
+        <HomeScreen
+          firebaseToken={firebaseToken}
+          onAuthExpired={handleAuthExpired}
+          backendUserId={backendUserId}
+        />
         <StatusBar style="dark" />
       </>
     );

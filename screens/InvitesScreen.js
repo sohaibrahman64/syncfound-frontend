@@ -6,6 +6,7 @@ import {
   FlatList,
   Image,
   Linking,
+  Modal,
   Platform,
   Pressable,
   RefreshControl,
@@ -13,6 +14,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -41,6 +43,7 @@ const TAB_SAVED = 'saved';
 const TAB_PASSED = 'passed';
 const PAGE_LIMIT = 20;
 const CACHE_TTL_MS = 60 * 1000;
+const ACCEPT_MESSAGE_LIMIT = 1000;
 
 const TABS = [
   { key: TAB_INVITATIONS, label: 'Invitations' },
@@ -424,6 +427,9 @@ export default function InvitesScreen({ firebaseToken = '', onAuthExpired, onNav
   const [selectedProfile, setSelectedProfile] = useState(null);
   const [isDetailActionLoading, setIsDetailActionLoading] = useState(false);
   const [snackbarMessage, setSnackbarMessage] = useState('');
+  const [isAcceptModalVisible, setIsAcceptModalVisible] = useState(false);
+  const [acceptanceMessage, setAcceptanceMessage] = useState('');
+  const [acceptanceError, setAcceptanceError] = useState('');
   const [tabsState, setTabsState] = useState({
     [TAB_INVITATIONS]: createTabState(),
     [TAB_SENT]: createTabState(),
@@ -607,7 +613,7 @@ export default function InvitesScreen({ firebaseToken = '', onAuthExpired, onNav
     return () => subscription.remove();
   }, [activeTab, loadTabData]);
 
-  const handleInviteAction = useCallback(async (item, action) => {
+  const handleInviteAction = useCallback(async (item, action, acceptanceMessage = '') => {
     if (!item?.inviteId) {
       return false;
     }
@@ -620,10 +626,11 @@ export default function InvitesScreen({ firebaseToken = '', onAuthExpired, onNav
     });
 
     try {
-      await withToken((token) => mutateInvite({
+      const payload = await withToken((token) => mutateInvite({
         firebaseToken: token,
         inviteId: item.inviteId,
         action,
+        acceptanceMessage,
         requestId: createRequestId(),
       }));
 
@@ -642,7 +649,7 @@ export default function InvitesScreen({ firebaseToken = '', onAuthExpired, onNav
         });
       }
 
-      return true;
+      return payload || {};
     } catch (error) {
       if (isAuthError(error)) {
         onAuthExpired?.();
@@ -651,7 +658,7 @@ export default function InvitesScreen({ firebaseToken = '', onAuthExpired, onNav
 
       patchTabState(TAB_INVITATIONS, { items: rollbackItems });
       setActionError(getActionErrorMessage(error, `Failed to ${action} invite.`));
-      return false;
+      return null;
     }
   }, [onAuthExpired, patchTabState, withToken]);
 
@@ -717,6 +724,62 @@ export default function InvitesScreen({ firebaseToken = '', onAuthExpired, onNav
     }
   }, [onAuthExpired, withToken]);
 
+  const openAcceptModal = useCallback(() => {
+    setAcceptanceError('');
+    setAcceptanceMessage('');
+    setIsAcceptModalVisible(true);
+  }, []);
+
+  const closeAcceptModal = useCallback(() => {
+    if (isDetailActionLoading) {
+      return;
+    }
+
+    setIsAcceptModalVisible(false);
+    setAcceptanceError('');
+    setAcceptanceMessage('');
+  }, [isDetailActionLoading]);
+
+  const handleSubmitAcceptance = useCallback(async () => {
+    if (!selectedProfile || activeTab !== TAB_INVITATIONS || isDetailActionLoading) {
+      return;
+    }
+
+    const payload = await handleInviteAction(selectedProfile, 'accept', acceptanceMessage);
+    if (!payload) {
+      setAcceptanceError('Could not send acceptance right now. Please try again.');
+      return;
+    }
+
+    setIsAcceptModalVisible(false);
+    setAcceptanceError('');
+    setAcceptanceMessage('');
+    showSnackbar(`You have accepted ${selectedProfile.displayName}'s invitation`);
+
+    const linkedChat = payload?.chat || payload?.data?.chat || null;
+    const conversationId = safeText(linkedChat?.conversation_id || linkedChat?.conversationId);
+    const initialMessageId = safeText(linkedChat?.initial_message_id || linkedChat?.initialMessageId);
+
+    if (conversationId) {
+      onNavigate?.({
+        tab: 'chat',
+        conversationId,
+        initialMessageId,
+      });
+      return;
+    }
+
+    setSelectedProfile(null);
+  }, [
+    acceptanceMessage,
+    activeTab,
+    handleInviteAction,
+    isDetailActionLoading,
+    onNavigate,
+    selectedProfile,
+    showSnackbar,
+  ]);
+
   const handleDetailPass = useCallback(async () => {
     if (!selectedProfile) {
       return;
@@ -778,16 +841,12 @@ export default function InvitesScreen({ firebaseToken = '', onAuthExpired, onNav
     }
 
     if (activeTab === TAB_INVITATIONS) {
-      const success = await handleInviteAction(selectedProfile, 'accept');
-      if (success) {
-        showSnackbar(`You have accepted ${selectedProfile.displayName}'s invitation`);
-        setSelectedProfile(null);
-      }
+      openAcceptModal();
       return;
     }
 
     await runCandidateAction(selectedProfile, 'like');
-  }, [activeTab, handleInviteAction, runCandidateAction, selectedProfile, showSnackbar]);
+  }, [activeTab, openAcceptModal, runCandidateAction, selectedProfile]);
 
   const activeTabState = tabsState[activeTab] || createTabState();
 
@@ -808,6 +867,78 @@ export default function InvitesScreen({ firebaseToken = '', onAuthExpired, onNav
 
   const shouldShowDetailActions = selectedProfile && activeTab !== TAB_SENT;
   const shouldShowSaveAction = activeTab !== TAB_INVITATIONS && activeTab !== TAB_PASSED;
+  const trimmedAcceptanceMessage = String(acceptanceMessage || '').trim();
+  const isSendAcceptanceDisabled = isDetailActionLoading || !trimmedAcceptanceMessage;
+
+  const inviteAcceptanceModal = (
+    <Modal
+      visible={isAcceptModalVisible}
+      transparent
+      animationType="fade"
+      onRequestClose={closeAcceptModal}
+      statusBarTranslucent
+      navigationBarTranslucent
+    >
+      <View style={styles.modalBackdrop}>
+        <Pressable style={styles.modalBackdropPressable} onPress={closeAcceptModal} />
+
+        <View style={styles.modalCardContainer}>
+          <View style={styles.modalCard}>
+            {selectedProfile?.photoUrl ? (
+              <Image source={{ uri: selectedProfile.photoUrl }} style={styles.modalPhoto} />
+            ) : (
+              <Image source={require('../assets/cofounders.jpg')} style={styles.modalPhoto} />
+            )}
+
+            <Text style={styles.modalName} numberOfLines={1}>
+              {selectedProfile?.displayName || ''}
+            </Text>
+
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Write an acceptance message..."
+              placeholderTextColor="#a0a0a0"
+              value={acceptanceMessage}
+              onChangeText={(text) => {
+                setAcceptanceMessage(text.slice(0, ACCEPT_MESSAGE_LIMIT));
+                if (acceptanceError) {
+                  setAcceptanceError('');
+                }
+              }}
+              multiline
+              textAlignVertical="top"
+              maxLength={ACCEPT_MESSAGE_LIMIT}
+            />
+
+            <Text style={styles.modalCharCounter}>
+              {acceptanceMessage.length}/{ACCEPT_MESSAGE_LIMIT}
+            </Text>
+
+            {!!acceptanceError && <Text style={styles.modalErrorText}>{acceptanceError}</Text>}
+
+            <Pressable
+              style={[styles.modalSendButton, isSendAcceptanceDisabled && styles.modalSendButtonDisabled]}
+              onPress={() => { void handleSubmitAcceptance(); }}
+              disabled={isSendAcceptanceDisabled}
+            >
+              {isDetailActionLoading ? (
+                <ActivityIndicator size="small" color="#ffffff" />
+              ) : (
+                <>
+                  <Image source={require('../assets/heart-white.png')} style={styles.modalSendIcon} />
+                  <Text style={styles.modalSendButtonText}>Accept</Text>
+                </>
+              )}
+            </Pressable>
+
+            <Pressable onPress={closeAcceptModal} hitSlop={10}>
+              <Text style={styles.modalCancelText}>Cancel</Text>
+            </Pressable>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
 
   if (selectedProfile) {
     const topMessage = getTopMessageForTab(activeTab, selectedProfile);
@@ -1099,6 +1230,8 @@ export default function InvitesScreen({ firebaseToken = '', onAuthExpired, onNav
             </Pressable>
           ))}
         </View>
+
+        {inviteAcceptanceModal}
       </SafeAreaView>
     );
   }
@@ -1170,6 +1303,8 @@ export default function InvitesScreen({ firebaseToken = '', onAuthExpired, onNav
           </Pressable>
         ))}
       </View>
+
+      {inviteAcceptanceModal}
     </SafeAreaView>
   );
 }
@@ -1489,6 +1624,118 @@ function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }, 
       lineHeight: responsiveFont(19, 16, 20),
       fontWeight: '500',
       textAlign: 'center',
+    },
+    modalBackdrop: {
+      flex: 1,
+      justifyContent: 'center',
+      alignItems: 'center',
+      backgroundColor: 'rgba(0, 0, 0, 0.45)',
+    },
+    modalBackdropPressable: {
+      ...StyleSheet.absoluteFillObject,
+    },
+    modalCardContainer: {
+      flex: 1,
+      width: '100%',
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: vw(4),
+    },
+    modalCard: {
+      width: vw(88),
+      maxWidth: 380,
+      backgroundColor: '#ffffff',
+      borderRadius: moderateScale(24),
+      paddingHorizontal: vw(6),
+      paddingTop: vh(3),
+      paddingBottom: vh(2.8),
+      alignItems: 'center',
+      shadowColor: '#000000',
+      shadowOpacity: 0.22,
+      shadowRadius: 20,
+      shadowOffset: { width: 0, height: 8 },
+      elevation: 12,
+    },
+    modalPhoto: {
+      width: moderateScale(96),
+      height: moderateScale(96),
+      borderRadius: moderateScale(48),
+      resizeMode: 'cover',
+      backgroundColor: '#d7d7d7',
+      marginBottom: vh(1.4),
+    },
+    modalName: {
+      color: '#161616',
+      fontSize: responsiveFont(isShortScreen ? 22 : 24, 18, 26),
+      lineHeight: responsiveFont(isShortScreen ? 28 : 30, 22, 32),
+      fontWeight: '600',
+      marginBottom: vh(1.8),
+      textAlign: 'center',
+    },
+    modalInput: {
+      width: '100%',
+      minHeight: moderateScale(110),
+      maxHeight: moderateScale(160),
+      borderBottomWidth: 1,
+      borderBottomColor: '#c8c8c8',
+      fontSize: responsiveFont(16, 14, 18),
+      lineHeight: responsiveFont(22, 18, 24),
+      color: '#2a2a2a',
+      fontStyle: 'italic',
+      paddingHorizontal: 0,
+      paddingTop: 0,
+      paddingBottom: vh(0.8),
+      textAlignVertical: 'top',
+    },
+    modalCharCounter: {
+      alignSelf: 'flex-end',
+      marginTop: vh(0.5),
+      color: '#a0a0a0',
+      fontSize: responsiveFont(13, 11, 15),
+      lineHeight: responsiveFont(17, 14, 20),
+      fontWeight: '400',
+      marginBottom: vh(1.4),
+    },
+    modalErrorText: {
+      color: '#c44f4f',
+      fontSize: responsiveFont(14, 12, 16),
+      lineHeight: responsiveFont(19, 16, 22),
+      fontWeight: '400',
+      textAlign: 'center',
+      marginBottom: vh(1),
+    },
+    modalSendButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: moderateScale(10),
+      backgroundColor: '#31c6d5',
+      borderRadius: 999,
+      minHeight: moderateScale(52),
+      paddingHorizontal: vw(8),
+      width: '80%',
+      marginBottom: vh(1.8),
+    },
+    modalSendButtonDisabled: {
+      opacity: 0.65,
+    },
+    modalSendIcon: {
+      width: moderateScale(22),
+      height: moderateScale(22),
+      resizeMode: 'contain',
+    },
+    modalSendButtonText: {
+      color: '#ffffff',
+      fontSize: responsiveFont(18, 15, 20),
+      lineHeight: responsiveFont(22, 18, 24),
+      fontWeight: '500',
+    },
+    modalCancelText: {
+      color: '#3d3d3d',
+      fontSize: responsiveFont(16, 14, 18),
+      lineHeight: responsiveFont(20, 17, 22),
+      fontWeight: '400',
+      textDecorationLine: 'underline',
     },
     bodyWrap: {
       flex: 1,

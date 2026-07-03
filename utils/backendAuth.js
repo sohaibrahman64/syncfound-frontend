@@ -700,6 +700,7 @@ export async function mutateInvite({
   firebaseToken = "",
   inviteId,
   action,
+  acceptanceMessage = "",
   requestId,
 } = {}) {
   if (!inviteId) {
@@ -709,6 +710,11 @@ export async function mutateInvite({
   const body = {
     action: String(action || "").trim(),
   };
+
+  const trimmedMessage = String(acceptanceMessage || "").trim();
+  if (trimmedMessage) {
+    body.acceptance_message = trimmedMessage;
+  }
 
   const normalizedRequestId = String(requestId || "").trim();
   if (normalizedRequestId) {
