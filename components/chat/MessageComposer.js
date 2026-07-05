@@ -1,5 +1,5 @@
 import React from 'react';
-import { ActivityIndicator, Pressable, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Image, Pressable, Text, TextInput, View } from 'react-native';
 
 export default function MessageComposer({
   value,
@@ -10,6 +10,8 @@ export default function MessageComposer({
   errorMessage,
   styles,
 } = {}) {
+  const canSend = !!value?.trim();
+
   return (
     <View style={styles.composerWrap}>
       {!!errorMessage && <Text style={styles.composerErrorText}>{errorMessage}</Text>}
@@ -27,14 +29,14 @@ export default function MessageComposer({
         />
 
         <Pressable
-          style={[styles.composerSendButton, (disabled || !value?.trim()) && styles.composerSendButtonDisabled]}
+          style={[styles.composerSendButton, (disabled || !canSend) && styles.composerSendButtonDisabled]}
           onPress={onSend}
-          disabled={disabled || !value?.trim()}
+          disabled={disabled || !canSend}
         >
           {isSending ? (
             <ActivityIndicator size="small" color="#ffffff" />
           ) : (
-            <Text style={styles.composerSendButtonText}>Send</Text>
+            <Image source={require('../../assets/send.png')} style={styles.composerSendIcon} />
           )}
         </Pressable>
       </View>

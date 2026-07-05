@@ -13,6 +13,44 @@ function sortAscendingByCreatedAt(items = []) {
   });
 }
 
+function mergeLocalPendingMessages(serverItems = [], localItems = []) {
+  const localPending = (Array.isArray(localItems) ? localItems : []).filter((item) => (
+    Boolean(item?.isOptimistic) || String(item?.sendState || '').toLowerCase() === 'failed'
+  ));
+
+  if (localPending.length === 0) {
+    return sortAscendingByCreatedAt(serverItems);
+  }
+
+  const merged = [...(Array.isArray(serverItems) ? serverItems : [])];
+
+  localPending.forEach((pendingItem) => {
+    const pendingId = String(pendingItem?.messageId || '').trim();
+    const pendingKey = String(pendingItem?.idempotencyKey || '').trim();
+
+    const existsOnServer = merged.some((serverItem) => {
+      const serverId = String(serverItem?.messageId || '').trim();
+      const serverKey = String(serverItem?.idempotencyKey || '').trim();
+
+      if (pendingId && pendingId === serverId) {
+        return true;
+      }
+
+      if (pendingKey && serverKey && pendingKey === serverKey) {
+        return true;
+      }
+
+      return false;
+    });
+
+    if (!existsOnServer) {
+      merged.push(pendingItem);
+    }
+  });
+
+  return sortAscendingByCreatedAt(merged);
+}
+
 export default function useChatThread({
   firebaseToken,
   conversationId,
@@ -120,7 +158,7 @@ export default function useChatThread({
           ? prependCursorPage(prev, sortAscendingByCreatedAt(payload.items), payload.nextCursor, payload.hasMore)
           : appendCursorPage(
             createCursorState(),
-            sortAscendingByCreatedAt(payload.items),
+            mergeLocalPendingMessages(payload.items, prev.items),
             payload.nextCursor,
             payload.hasMore,
           );
@@ -233,17 +271,34 @@ export default function useChatThread({
 
       setMessageState((prev) => ({
         ...prev,
-        items: sortAscendingByCreatedAt(
-          (prev.items || []).map((item) => {
+        items: (() => {
+          const nextItems = [];
+          let replaced = false;
+
+          (prev.items || []).forEach((item) => {
             if (item.idempotencyKey === idempotencyKey || item.messageId === optimisticMessage.messageId) {
-              return {
-                ...serverMessage,
-                isMine: true,
-              };
+              if (!replaced) {
+                nextItems.push({
+                  ...serverMessage,
+                  isMine: true,
+                });
+                replaced = true;
+              }
+              return;
             }
-            return item;
-          }),
-        ),
+
+            nextItems.push(item);
+          });
+
+          if (!replaced) {
+            nextItems.push({
+              ...serverMessage,
+              isMine: true,
+            });
+          }
+
+          return sortAscendingByCreatedAt(nextItems);
+        })(),
       }));
 
       onAnalyticsEvent?.('chat_message_sent', {

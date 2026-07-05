@@ -21,6 +21,7 @@ import ChatListCard from '../components/chat/ChatListCard';
 import MessageBubble from '../components/chat/MessageBubble';
 import MessageComposer from '../components/chat/MessageComposer';
 import { logAnalyticsEvent } from '../utils/swipeMonetization';
+import { subscribeToChatPushEvents } from '../utils/chatPushEvents';
 
 const TAB_ACTIVE = 'active';
 const TAB_ARCHIVED = 'archived';
@@ -141,6 +142,10 @@ export default function ChatScreen({
       return;
     }
 
+    if (latestMessage?.isOptimistic || latestMessage?.sendState === 'failed') {
+      return;
+    }
+
     void markAsRead({
       conversationId: selectedConversationId,
       lastReadMessageId: latestMessage.messageId,
@@ -167,39 +172,46 @@ export default function ChatScreen({
   }, [highlightMessageId, messages]);
 
   useEffect(() => {
-    if (!selectedConversationId || threadTab !== THREAD_TAB_CHAT) {
-      return;
-    }
-
     const subscription = AppState.addEventListener('change', (nextState) => {
+      const previousState = appStateRef.current;
       appStateRef.current = nextState;
+
+      if (previousState !== 'active' && nextState === 'active') {
+        void refresh();
+        if (selectedConversationId && threadTab === THREAD_TAB_CHAT) {
+          refreshThread();
+        }
+      }
     });
 
-    const intervalId = setInterval(() => {
-      if (appStateRef.current !== 'active') {
-        return;
-      }
-
-      if (isThreadLoading || isThreadRefreshing || isThreadPaginating || isSending) {
-        return;
-      }
-
-      refreshThread();
-    }, 200);
-
     return () => {
-      clearInterval(intervalId);
       subscription.remove();
     };
-  }, [
-    isSending,
-    isThreadLoading,
-    isThreadPaginating,
-    isThreadRefreshing,
-    refreshThread,
-    selectedConversationId,
-    threadTab,
-  ]);
+  }, [refresh, refreshThread, selectedConversationId, threadTab]);
+
+  useEffect(() => {
+    const unsubscribe = subscribeToChatPushEvents((event) => {
+      if (!event?.type) {
+        return;
+      }
+
+      if (event.type !== 'chat.message.created' && event.type !== 'chat.message.read') {
+        return;
+      }
+
+      void refresh();
+
+      if (
+        selectedConversationId &&
+        threadTab === THREAD_TAB_CHAT &&
+        String(event.conversationId || '') === String(selectedConversationId || '')
+      ) {
+        refreshThread();
+      }
+    });
+
+    return unsubscribe;
+  }, [refresh, refreshThread, selectedConversationId, threadTab]);
 
   const handleScrollToIndexFailed = useCallback((info) => {
     const pendingIndex = pendingScrollIndexRef.current;
@@ -785,7 +797,7 @@ function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }, 
     },
     composerInputRow: {
       flexDirection: 'row',
-      alignItems: 'flex-end',
+      alignItems: 'center',
       gap: moderateScale(8),
     },
     composerInput: {
@@ -803,22 +815,16 @@ function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }, 
       textAlignVertical: 'top',
     },
     composerSendButton: {
-      height: moderateScale(46),
-      borderRadius: moderateScale(14),
-      minWidth: moderateScale(78),
       alignItems: 'center',
       justifyContent: 'center',
-      backgroundColor: '#20bcc8',
-      paddingHorizontal: moderateScale(14),
     },
     composerSendButtonDisabled: {
       opacity: 0.55,
     },
-    composerSendButtonText: {
-      color: '#ffffff',
-      fontSize: responsiveFont(14, 12, 16),
-      lineHeight: responsiveFont(18, 15, 20),
-      fontWeight: '600',
+    composerSendIcon: {
+      width: moderateScale(22),
+      height: moderateScale(22),
+      resizeMode: 'contain',
     },
     profilePanel: {
       flex: 1,

@@ -20,6 +20,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { getEntitlements, getInviteCounts, getMyMatches, getPricingPlans, postMatchAction } from '../utils/backendAuth';
 import { getCurrentFirebaseIdToken } from '../utils/firebaseAuth';
 import { listChats } from '../utils/chatApi';
+import { subscribeToChatPushEvents } from '../utils/chatPushEvents';
 import { FLAG_ASSET_MAP } from '../utils/flagAssetMap';
 import { useResponsiveMetrics } from '../utils/responsive';
 import {
@@ -285,7 +286,12 @@ function DiscoverListItem({ card, styles, onPress }) {
   );
 }
 
-export default function HomeScreen({ firebaseToken = '', onAuthExpired, backendUserId = '' }) {
+export default function HomeScreen({
+  firebaseToken = '',
+  onAuthExpired,
+  backendUserId = '',
+  chatNotificationLaunch = null,
+}) {
   const metrics = useResponsiveMetrics();
   const insets = useSafeAreaInsets();
   const styles = useMemo(() => createStyles(metrics, insets), [metrics, insets.top, insets.bottom]);
@@ -593,6 +599,33 @@ export default function HomeScreen({ firebaseToken = '', onAuthExpired, backendU
       fetchUnreadBadges();
     }
   }, [activeBottomTab, fetchUnreadBadges]);
+
+  useEffect(() => {
+    const conversationId = String(chatNotificationLaunch?.conversationId || '').trim();
+    if (!conversationId) {
+      return;
+    }
+
+    setChatLaunchContext({
+      conversationId,
+      initialMessageId: String(chatNotificationLaunch?.initialMessageId || '').trim(),
+    });
+    setActiveBottomTab(TAB_CHAT);
+  }, [chatNotificationLaunch]);
+
+  useEffect(() => {
+    const unsubscribe = subscribeToChatPushEvents((event) => {
+      if (!event?.type) {
+        return;
+      }
+
+      if (event.type === 'chat.message.created' || event.type === 'chat.message.read') {
+        void fetchUnreadBadges();
+      }
+    });
+
+    return unsubscribe;
+  }, [fetchUnreadBadges]);
 
   const premiumPlan = useMemo(
     () => pricingPlans.find((plan) => String(plan?.tier || '').toLowerCase() === 'premium') || null,

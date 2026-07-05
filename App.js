@@ -1,6 +1,6 @@
 import { StatusBar } from 'expo-status-bar';
-import { useEffect, useState } from 'react';
-import { Alert, Platform, Text, TextInput, View } from 'react-native';
+import { useCallback, useEffect, useState } from 'react';
+import { Alert, Linking, Platform, Text, TextInput, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   PlusJakartaSans_400Regular,
@@ -11,11 +11,14 @@ import {
 } from '@expo-google-fonts/plus-jakarta-sans';
 import { sendOtp, signOutFirebaseSession } from './utils/firebaseAuth';
 import {
-  deactivateDevicePushToken,
   sendFirebaseIdTokenToBackend,
   signInWithFirebaseToken,
   updateUserEmailInBackend,
 } from './utils/backendAuth';
+import {
+  deactivateCurrentDevicePushToken,
+  initializeChatNotifications,
+} from './utils/chatNotifications';
 import SyncFoundSplashScreen from './screens/SyncFoundSplashScreen';
 import PhoneNumberScreen from './screens/PhoneNumberScreen';
 import CountryPickerScreen from './screens/CountryPickerScreen';
@@ -30,6 +33,38 @@ import { getPlatformBaseFontFamily } from './utils/typography';
 let hasAppliedGlobalPlatformFontDefaults = false;
 const SESSION_STORAGE_KEY = '@syncfound/session';
 const PROFILE_COMPLETE_STORAGE_KEY = '@syncfound/profile_complete';
+
+function parseChatLaunchFromUrl(url) {
+  const normalizedUrl = String(url || '').trim();
+  if (!normalizedUrl) {
+    return null;
+  }
+
+  try {
+    const parsed = new URL(normalizedUrl);
+    const conversationId = String(
+      parsed.searchParams.get('chat_conversation_id') ||
+      parsed.searchParams.get('conversation_id') ||
+      '',
+    ).trim();
+    const initialMessageId = String(
+      parsed.searchParams.get('chat_message_id') ||
+      parsed.searchParams.get('message_id') ||
+      '',
+    ).trim();
+
+    if (!conversationId) {
+      return null;
+    }
+
+    return {
+      conversationId,
+      initialMessageId,
+    };
+  } catch {
+    return null;
+  }
+}
 
 function applyGlobalPlatformFontDefaults() {
   if (hasAppliedGlobalPlatformFontDefaults) {
@@ -70,16 +105,16 @@ export default function App() {
   const [backendUserId, setBackendUserId] = useState(null);
   const [isUpdatingEmail, setIsUpdatingEmail] = useState(false);
   const [emailUpdateError, setEmailUpdateError] = useState('');
+  const [chatNotificationLaunch, setChatNotificationLaunch] = useState({
+    conversationId: '',
+    initialMessageId: '',
+    nonce: 0,
+  });
 
-  async function handleAuthExpired() {
-    const pushToken = String(process.env.EXPO_PUBLIC_DEVICE_PUSH_TOKEN || '').trim();
-
-    if (pushToken) {
-      await deactivateDevicePushToken({
-        firebaseToken,
-        token: pushToken,
-      }).catch(() => {});
-    }
+  const handleAuthExpired = useCallback(async () => {
+    await deactivateCurrentDevicePushToken({
+      firebaseToken,
+    }).catch(() => {});
 
     await signOutFirebaseSession().catch(() => {});
     await Promise.all([
@@ -90,8 +125,13 @@ export default function App() {
     setFirebaseToken('');
     setBackendUserId(null);
     setVerifiedPhoneNumber('');
+    setChatNotificationLaunch({
+      conversationId: '',
+      initialMessageId: '',
+      nonce: 0,
+    });
     setCurrentScreen('splash');
-  }
+  }, [firebaseToken]);
 
   const [fontsLoaded] = useFonts({
     PlusJakartaSans_400Regular,
@@ -105,6 +145,103 @@ export default function App() {
       applyGlobalPlatformFontDefaults();
     }
   }, [fontsLoaded]);
+
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') {
+      return;
+    }
+
+    const params = new URLSearchParams(window.location.search || '');
+    const conversationId = String(params.get('chat_conversation_id') || '').trim();
+    const initialMessageId = String(params.get('chat_message_id') || '').trim();
+    if (!conversationId) {
+      return;
+    }
+
+    setChatNotificationLaunch({
+      conversationId,
+      initialMessageId,
+      nonce: Date.now(),
+    });
+
+    params.delete('chat_conversation_id');
+    params.delete('chat_message_id');
+    const nextQuery = params.toString();
+    const nextUrl = `${window.location.pathname}${nextQuery ? `?${nextQuery}` : ''}${window.location.hash || ''}`;
+    window.history.replaceState({}, '', nextUrl);
+  }, []);
+
+  useEffect(() => {
+    const consumeUrl = (url) => {
+      const launch = parseChatLaunchFromUrl(url);
+      if (!launch) {
+        return;
+      }
+
+      setCurrentScreen('home');
+      setChatNotificationLaunch({
+        conversationId: launch.conversationId,
+        initialMessageId: launch.initialMessageId,
+        nonce: Date.now(),
+      });
+    };
+
+    Linking.getInitialURL().then((initialUrl) => {
+      if (initialUrl) {
+        consumeUrl(initialUrl);
+      }
+    }).catch(() => {});
+
+    const subscription = Linking.addEventListener('url', ({ url }) => {
+      consumeUrl(url);
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!String(firebaseToken || '').trim()) {
+      return;
+    }
+
+    let cleanup = () => {};
+    let isMounted = true;
+
+    const init = async () => {
+      const release = await initializeChatNotifications({
+        firebaseToken,
+        onAuthExpired: handleAuthExpired,
+        onChatNotificationOpen: ({ conversationId, initialMessageId }) => {
+          if (!isMounted) {
+            return;
+          }
+
+          setCurrentScreen('home');
+          setChatNotificationLaunch({
+            conversationId: String(conversationId || '').trim(),
+            initialMessageId: String(initialMessageId || '').trim(),
+            nonce: Date.now(),
+          });
+        },
+      });
+
+      if (!isMounted) {
+        release?.();
+        return;
+      }
+
+      cleanup = typeof release === 'function' ? release : () => {};
+    };
+
+    void init();
+
+    return () => {
+      isMounted = false;
+      cleanup?.();
+    };
+  }, [firebaseToken, handleAuthExpired]);
 
   // Resume wizard if the user had an in-progress profile and comes back to the app
   useEffect(() => {
@@ -342,6 +479,7 @@ export default function App() {
           firebaseToken={firebaseToken}
           onAuthExpired={handleAuthExpired}
           backendUserId={backendUserId}
+          chatNotificationLaunch={chatNotificationLaunch}
         />
         <StatusBar style="dark" />
       </>
