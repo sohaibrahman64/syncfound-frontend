@@ -324,11 +324,13 @@ export default function HomeScreen({
   const [interstitialVisible, setInterstitialVisible] = useState(false);
   const [swipesUsed, setSwipesUsed] = useState(null);
   const [swipesRemaining, setSwipesRemaining] = useState(null);
+  const [invitesUpgradeSignal, setInvitesUpgradeSignal] = useState(0);
   // resumedAfterPaywall enables the local fallback ad counter (every 4 swipes)
   const [resumedAfterPaywall, setResumedAfterPaywall] = useState(false);
   const [entitlements, setEntitlements] = useState(null);
   const [pricingPlans, setPricingPlans] = useState([]);
   const resumeActionCountRef = useRef(0);
+  const invitesUpgradeRequestedRef = useRef(false);
   // Holds the card-advance callback to execute once the interstitial is dismissed
   const pendingAdvanceRef = useRef(null);
 
@@ -559,6 +561,11 @@ export default function HomeScreen({
       const token = await getCurrentFirebaseIdToken(false).catch(() => firebaseToken);
       const data = await getEntitlements(token);
       setEntitlements(data);
+      const nextTier = String(data?.tier || data?.plan_tier || '').trim().toLowerCase();
+      if (invitesUpgradeRequestedRef.current && nextTier === 'premium') {
+        invitesUpgradeRequestedRef.current = false;
+        setInvitesUpgradeSignal((prev) => prev + 1);
+      }
       if (data?.matchmaking_swipe_limit != null) {
         setSwipesRemaining(data.matchmaking_swipe_limit);
       }
@@ -632,15 +639,18 @@ export default function HomeScreen({
     [pricingPlans],
   );
 
-  const premiumPriceText = useMemo(() => {
+  const premiumPriceAmount = useMemo(() => {
     const priceMinor = Number(premiumPlan?.price_minor);
     if (!Number.isFinite(priceMinor)) {
-      return 'Only $9.99 per month';
+      return '9.99';
     }
 
+    return (priceMinor / 100).toFixed(2);
+  }, [premiumPlan]);
+
+  const premiumCurrencySymbol = useMemo(() => {
     const currencyCode = String(premiumPlan?.currency_code || 'USD').toUpperCase();
-    const currencySymbol = currencyCode === 'USD' ? '$' : `${currencyCode} `;
-    return `Only ${currencySymbol}${(priceMinor / 100).toFixed(2)} per month`;
+    return currencyCode === 'USD' ? '$' : currencyCode;
   }, [premiumPlan]);
 
   // ---------------------------------------------------------------------------
@@ -879,6 +889,16 @@ export default function HomeScreen({
       return;
     }
 
+    if (payload?.openPaywall) {
+      if (payload?.source === 'invites') {
+        invitesUpgradeRequestedRef.current = true;
+      }
+
+      setActiveBottomTab(TAB_SYNC);
+      setPaywallVisible(true);
+      return;
+    }
+
     if (normalized === TAB_CHAT) {
       setChatLaunchContext({
         conversationId: String(payload?.conversationId || '').trim(),
@@ -889,12 +909,20 @@ export default function HomeScreen({
     setActiveBottomTab(normalized);
   }, []);
 
+  const handleDismissPaywall = useCallback(() => {
+    logAnalyticsEvent('matches_paywall_maybe_later');
+    setResumedAfterPaywall(true);
+    resumeActionCountRef.current = 0;
+    setPaywallVisible(false);
+  }, []);
+
   if (activeBottomTab === TAB_INVITES) {
     return (
       <InvitesScreen
         firebaseToken={firebaseToken}
         onAuthExpired={onAuthExpired}
         onNavigate={handleNavigateBottomTab}
+        upgradeUnlockSignal={invitesUpgradeSignal}
       />
     );
   }
@@ -1150,95 +1178,123 @@ export default function HomeScreen({
         visible={paywallVisible}
         transparent={false}
         animationType="slide"
-        onRequestClose={() => {
-          logAnalyticsEvent('matches_paywall_maybe_later');
-          setResumedAfterPaywall(true);
-          resumeActionCountRef.current = 0;
-          setPaywallVisible(false);
-        }}
+        onRequestClose={handleDismissPaywall}
         statusBarTranslucent
         navigationBarTranslucent
       >
         <LinearGradient
-          colors={['#d6f0ee', '#45c2c9']}
+          colors={['#f8fcfb', '#eef8f6', '#e7f5f3']}
           start={{ x: 0.5, y: 0 }}
           end={{ x: 0.5, y: 1 }}
           style={styles.paywallContainer}
         >
-          {/* Top bar */}
           <View style={styles.paywallTopBar}>
             <View style={styles.paywallLogoRow}>
+              <Pressable hitSlop={12} onPress={handleDismissPaywall} accessibilityRole="button" accessibilityLabel="Close paywall">
+                <Text style={styles.paywallCloseText}>✕</Text>
+              </Pressable>
               <Image
-                source={require('../assets/syncfound_text_logo_black.png')}
+                source={require('../assets/syncfound_text_logo_green.png')}
                 style={styles.paywallWordmark}
               />
             </View>
-            <Pressable
-              style={styles.paywallCloseButton}
-              hitSlop={12}
-              onPress={() => {
-                logAnalyticsEvent('matches_paywall_maybe_later');
-                setResumedAfterPaywall(true);
-                resumeActionCountRef.current = 0;
-                setPaywallVisible(false);
-              }}
-            >
-              <Text style={styles.paywallCloseText}>✕</Text>
+
+            <Pressable hitSlop={12}>
+              <Text style={styles.paywallHelpText}>Help</Text>
             </Pressable>
           </View>
 
-          {/* Icon */}
-          <View style={styles.paywallIconWrap}>
-            <Image source={require('../assets/flash.png')} style={styles.paywallMainIcon} />
-          </View>
-
-          {/* Heading */}
-          <Text style={styles.paywallTitle}>Daily Matchmaking{'\n'}Capped at 10 Swipes</Text>
-
-          {/* Subtitle */}
-          <Text style={styles.paywallSubtitle}>
-            You've reached today's limit for discoveries. Our community thrives on meaningful
-            connections, and we're excited to see who you find tomorrow!
-          </Text>
-
-          {/* Info cards */}
-          <View style={styles.paywallInfoCard}>
-            <Image source={require('../assets/eye.png')} style={styles.paywallInfoIconImage} />
-            <View style={styles.paywallInfoContent}>
-              <Text style={styles.paywallInfoTitle}>Transparency Note</Text>
-              <Text style={styles.paywallInfoBody}>
-                Ads are shown after every 4 swipes for free accounts
-              </Text>
-            </View>
-          </View>
-
-          <View style={styles.paywallInfoCard}>
-            <Image source={require('../assets/refresh.png')} style={styles.paywallInfoIconImage} />
-            <View style={styles.paywallInfoContent}>
-              <Text style={styles.paywallInfoTitle}>Next Refresh</Text>
-              <Text style={styles.paywallInfoBody}>Your swipe counter resets in 24 hours.</Text>
-            </View>
-          </View>
-
-          {/* CTA */}
-          <View style={styles.paywallUpgradeWrap}>
-            <Pressable style={styles.paywallUpgradeButton}>
-              <Text style={styles.paywallUpgradeText}>Upgrade to Premium</Text>
-            </Pressable>
-            <Text style={styles.paywallPriceText}>{premiumPriceText}</Text>
-          </View>
-
-          <Pressable
-            hitSlop={12}
-            onPress={() => {
-              logAnalyticsEvent('matches_paywall_maybe_later');
-              setResumedAfterPaywall(true);
-              resumeActionCountRef.current = 0;
-              setPaywallVisible(false);
-            }}
+          <ScrollView
+            style={styles.paywallScroll}
+            contentContainerStyle={styles.paywallScrollContent}
+            showsVerticalScrollIndicator={false}
           >
-            <Text style={styles.paywallMaybeLaterText}>Maybe Later</Text>
-          </Pressable>
+            <View style={styles.paywallHeroSection}>
+              <View style={styles.paywallMembershipPill}>
+                <Text style={styles.paywallMembershipPillText}>PREMIUM MEMBERSHIP</Text>
+              </View>
+
+              <Text style={styles.paywallTitle}>
+                {'Get\nSyncFound\n'}
+                <Text style={styles.paywallTitleAccent}>Premium</Text>
+              </Text>
+
+              <Text style={styles.paywallSubtitle}>
+                Supercharge your founder journey with exclusive tools and high-tier networking.
+              </Text>
+
+              <View style={styles.paywallHeroImageWrap}>
+                <Image
+                  source={require('../assets/syncfound-premium-screen-hero-image.png')}
+                  style={styles.paywallHeroImage}
+                />
+
+                <View style={styles.paywallEliteCard}>
+                  <Image source={require('../assets/elite-status.png')} style={styles.paywallEliteIcon} />
+                  <View style={styles.paywallEliteContent}>
+                    <Text style={styles.paywallEliteTitle}>Elite Status</Text>
+                    <Text style={styles.paywallEliteBody}>Join the top 5% of ambitious builders globally.</Text>
+                  </View>
+                </View>
+              </View>
+            </View>
+
+            <View style={styles.paywallFeatureCard}>
+              <Image source={require('../assets/unlimited-swipes.png')} style={styles.paywallFeatureIcon} />
+              <Text style={styles.paywallFeatureTitle}>Unlimited Swipes</Text>
+              <Text style={styles.paywallFeatureBody}>Match without limits. Keep exploring until you find the perfect synergy.</Text>
+            </View>
+
+            <View style={styles.paywallFeatureCard}>
+              <Image source={require('../assets/ad-free.png')} style={styles.paywallFeatureIcon} />
+              <Text style={styles.paywallFeatureTitle}>Ad-Free Experience</Text>
+              <Text style={styles.paywallFeatureBody}>No interruptions. Focus purely on building meaningful connections.</Text>
+            </View>
+
+            <View style={styles.paywallFeatureCard}>
+              <Image source={require('../assets/access-vc-investors.png')} style={styles.paywallFeatureIcon} />
+              <Text style={styles.paywallFeatureTitle}>VC & Investor Access</Text>
+              <Text style={styles.paywallFeatureBody}>Direct introductions to top-tier investors and venture partners.</Text>
+            </View>
+
+            <View style={styles.paywallFeatureCard}>
+              <Image source={require('../assets/curated-events.png')} style={styles.paywallFeatureIcon} />
+              <Text style={styles.paywallFeatureTitle}>Curated Events</Text>
+              <Text style={styles.paywallFeatureBody}>Exclusive access to invite-only founder networking dinners.</Text>
+            </View>
+
+            <View style={styles.paywallBottomSheet}>
+              <View style={styles.paywallBottomDecor} />
+              <Text style={styles.paywallBottomTitle}>Premium Membership</Text>
+
+              <View style={styles.paywallPriceRow}>
+                <Text style={styles.paywallCurrencyText}>{premiumCurrencySymbol}</Text>
+                <Text style={styles.paywallPriceValue}>{premiumPriceAmount}</Text>
+                <Text style={styles.paywallPriceUnit}>/ month</Text>
+              </View>
+
+              <Text style={styles.paywallBillingText}>Billed monthly. Cancel anytime with one click.</Text>
+
+              <View style={styles.paywallUpgradeWrap}>
+                <Pressable style={styles.paywallUpgradeButton}>
+                  <Text style={styles.paywallUpgradeText}>Upgrade Now</Text>
+                </Pressable>
+              </View>
+
+              <Pressable
+                hitSlop={12}
+                onPress={handleDismissPaywall}
+              >
+                <Text style={styles.paywallMaybeLaterText}>Maybe Later</Text>
+              </Pressable>
+
+              <View style={styles.paywallSecurityRow}>
+                <Image source={require('../assets/verified.png')} style={styles.paywallSecurityIcon} />
+                <Image source={require('../assets/padlock.png')} style={styles.paywallSecurityIcon} />
+                <Image source={require('../assets/card.png')} style={styles.paywallSecurityIcon} />
+              </View>
+            </View>
+          </ScrollView>
         </LinearGradient>
       </Modal>
 
@@ -1941,123 +1997,237 @@ function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }, 
     // -------------------------------------------------------------------------
     paywallContainer: {
       flex: 1,
-      paddingHorizontal: vw(6),
-      paddingTop: isShortScreen ? vh(3) : vh(5),
-      paddingBottom: vh(4),
-      alignItems: 'center',
+      paddingTop: topInset + vh(1.2),
+      backgroundColor: '#f5fbfa',
     },
     paywallTopBar: {
       width: '100%',
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
-      marginBottom: vh(2.5),
+      paddingHorizontal: vw(4.5),
+      paddingBottom: vh(1.6),
+      backgroundColor: '#ffffff',
     },
     paywallLogoRow: {
       flexDirection: 'row',
       alignItems: 'center',
+      gap: moderateScale(12),
     },
     paywallWordmark: {
-      width: vw(36),
-      height: moderateScale(28),
+      width: vw(40),
+      height: moderateScale(32),
       resizeMode: 'contain',
-      tintColor: '#2bb8c6',
-    },
-    paywallCloseButton: {
-      width: moderateScale(36),
-      height: moderateScale(36),
-      alignItems: 'center',
-      justifyContent: 'center',
     },
     paywallCloseText: {
-      fontSize: responsiveFont(28, 24, 30),
-      color: '#2e5a6e',
+      fontSize: responsiveFont(30, 26, 32),
+      color: '#7a8298',
       fontWeight: '400',
     },
-    paywallIconWrap: {
-      width: moderateScale(80),
-      height: moderateScale(80),
-      borderRadius: moderateScale(20),
-      backgroundColor: '#ffffff',
+    paywallHelpText: {
+      color: '#2cbbc1',
+      fontSize: responsiveFont(18, 15, 19),
+      lineHeight: responsiveFont(22, 18, 24),
+      fontWeight: '400',
+    },
+    paywallScroll: {
+      flex: 1,
+      width: '100%',
+    },
+    paywallScrollContent: {
+      paddingBottom: vh(4),
+    },
+    paywallHeroSection: {
+      alignItems: 'center',
+      paddingHorizontal: vw(5),
+      paddingTop: vh(3),
+    },
+    paywallMembershipPill: {
+      minHeight: moderateScale(44),
+      borderRadius: 999,
+      backgroundColor: '#2cbbc1',
+      paddingHorizontal: moderateScale(30),
       alignItems: 'center',
       justifyContent: 'center',
-      marginBottom: vh(2),
-      shadowColor: '#000000',
-      shadowOpacity: 0.1,
-      shadowRadius: 8,
-      shadowOffset: { width: 0, height: 4 },
-      elevation: 4,
+      marginBottom: vh(2.2),
     },
-    paywallMainIcon: {
-      width: moderateScale(34),
-      height: moderateScale(34),
-      resizeMode: 'contain',
+    paywallMembershipPillText: {
+      color: '#ffffff',
+      fontSize: responsiveFont(16, 13, 17),
+      lineHeight: responsiveFont(20, 16, 22),
+      fontWeight: '500',
     },
     paywallTitle: {
-      color: '#1a3a4a',
-      fontSize: responsiveFont(isShortScreen ? 24 : 26, 21, 30),
-      lineHeight: responsiveFont(isShortScreen ? 30 : 34, 27, 38),
+      color: '#000000',
+      fontSize: responsiveFont(isShortScreen ? 30 : 34, 28, 40),
+      lineHeight: responsiveFont(isShortScreen ? 38 : 44, 34, 48),
       fontWeight: '700',
       textAlign: 'center',
-      marginBottom: vh(1.4),
+      marginBottom: vh(1.8),
+    },
+    paywallTitleAccent: {
+      color: '#2cbbc1',
     },
     paywallSubtitle: {
-      color: '#2e5060',
-      fontSize: responsiveFont(15, 13, 17),
-      lineHeight: responsiveFont(22, 18, 25),
+      color: '#3e4a50',
+      fontSize: responsiveFont(17, 14, 18),
+      lineHeight: responsiveFont(26, 21, 27),
       fontWeight: '400',
       textAlign: 'center',
-      marginBottom: vh(2.4),
-      paddingHorizontal: vw(2),
+      paddingHorizontal: vw(5),
     },
-    paywallInfoCard: {
+    paywallHeroImageWrap: {
       width: '100%',
+      marginTop: vh(2.6),
+      position: 'relative',
+      alignItems: 'center',
+    },
+    paywallHeroImage: {
+      width: '92%',
+      height: moderateScale(250),
+      borderRadius: moderateScale(32),
+      resizeMode: 'cover',
+    },
+    paywallEliteCard: {
+      position: 'absolute',
+      left: moderateScale(0),
+      top: moderateScale(-8),
+      width: moderateScale(170),
       backgroundColor: '#ffffff',
-      borderRadius: moderateScale(16),
-      padding: moderateScale(16),
-      flexDirection: 'row',
-      alignItems: 'flex-start',
-      marginBottom: vh(1.4),
+      borderRadius: moderateScale(20),
+      paddingHorizontal: moderateScale(12),
+      paddingVertical: moderateScale(12),
+      transform: [{ rotate: '-9deg' }],
       shadowColor: '#000000',
-      shadowOpacity: 0.06,
-      shadowRadius: 6,
-      shadowOffset: { width: 0, height: 2 },
-      elevation: 2,
+      shadowOpacity: 0.08,
+      shadowRadius: 10,
+      shadowOffset: { width: 0, height: 5 },
+      elevation: 4,
     },
-    paywallInfoIconImage: {
-      width: moderateScale(24),
-      height: moderateScale(24),
+    paywallEliteIcon: {
+      width: moderateScale(22),
+      height: moderateScale(22),
       resizeMode: 'contain',
-      marginRight: moderateScale(12),
-      marginTop: moderateScale(2),
+      marginBottom: moderateScale(6),
     },
-    paywallInfoContent: {
-      flex: 1,
+    paywallEliteContent: {
+      gap: moderateScale(2),
     },
-    paywallInfoTitle: {
-      color: '#1a1a1a',
-      fontSize: responsiveFont(15, 13, 17),
-      lineHeight: responsiveFont(20, 17, 22),
+    paywallEliteTitle: {
+      color: '#374248',
+      fontSize: responsiveFont(15, 12, 16),
+      lineHeight: responsiveFont(19, 15, 20),
       fontWeight: '600',
-      marginBottom: moderateScale(3),
     },
-    paywallInfoBody: {
-      color: '#555555',
-      fontSize: responsiveFont(14, 12, 16),
-      lineHeight: responsiveFont(19, 16, 22),
+    paywallEliteBody: {
+      color: '#49565c',
+      fontSize: responsiveFont(12, 10, 13),
+      lineHeight: responsiveFont(17, 14, 18),
       fontWeight: '400',
     },
-    paywallUpgradeButton: {
-      backgroundColor: '#22898e',
+    paywallFeatureCard: {
+      marginTop: vh(2.2),
+      marginHorizontal: vw(5),
+      backgroundColor: '#f7f6fb',
+      borderRadius: moderateScale(22),
+      paddingHorizontal: moderateScale(22),
+      paddingVertical: moderateScale(24),
+    },
+    paywallFeatureIcon: {
+      width: moderateScale(52),
+      height: moderateScale(52),
+      resizeMode: 'contain',
+      marginBottom: moderateScale(16),
+      tintColor: '#2cbbc1',
+    },
+    paywallFeatureTitle: {
+      color: '#050505',
+      fontSize: responsiveFont(22, 18, 24),
+      lineHeight: responsiveFont(28, 23, 30),
+      fontWeight: '700',
+    },
+    paywallFeatureBody: {
+      marginTop: moderateScale(12),
+      color: '#445157',
+      fontSize: responsiveFont(17, 14, 18),
+      lineHeight: responsiveFont(27, 21, 28),
+      fontWeight: '400',
+    },
+    paywallBottomSheet: {
+      marginTop: vh(2.4),
+      backgroundColor: '#ffffff',
+      borderTopLeftRadius: moderateScale(28),
+      borderTopRightRadius: moderateScale(28),
+      borderBottomLeftRadius: moderateScale(24),
+      borderBottomRightRadius: moderateScale(24),
+      paddingTop: vh(4),
+      paddingBottom: vh(3.2),
+      paddingHorizontal: vw(8),
+      alignItems: 'center',
+      overflow: 'hidden',
+    },
+    paywallBottomDecor: {
+      position: 'absolute',
+      right: -moderateScale(22),
+      top: -moderateScale(8),
+      width: moderateScale(96),
+      height: moderateScale(96),
       borderRadius: 999,
-      minHeight: moderateScale(54),
+      backgroundColor: '#e6f4f4',
+    },
+    paywallBottomTitle: {
+      color: '#060606',
+      fontSize: responsiveFont(22, 18, 24),
+      lineHeight: responsiveFont(28, 23, 30),
+      fontWeight: '700',
+    },
+    paywallPriceRow: {
+      marginTop: vh(2),
+      flexDirection: 'row',
+      alignItems: 'flex-end',
+    },
+    paywallCurrencyText: {
+      color: '#000000',
+      fontSize: responsiveFont(22, 18, 24),
+      lineHeight: responsiveFont(28, 22, 30),
+      fontWeight: '600',
+      marginRight: moderateScale(8),
+      marginBottom: moderateScale(10),
+    },
+    paywallPriceValue: {
+      color: '#000000',
+      fontSize: responsiveFont(54, 42, 60),
+      lineHeight: responsiveFont(60, 48, 66),
+      fontWeight: '700',
+    },
+    paywallPriceUnit: {
+      color: '#202020',
+      fontSize: responsiveFont(24, 18, 26),
+      lineHeight: responsiveFont(30, 22, 32),
+      fontWeight: '400',
+      marginLeft: moderateScale(8),
+      marginBottom: moderateScale(10),
+    },
+    paywallBillingText: {
+      marginTop: vh(2),
+      color: '#465157',
+      textAlign: 'center',
+      fontSize: responsiveFont(16, 13, 17),
+      lineHeight: responsiveFont(23, 18, 24),
+      fontWeight: '400',
+      paddingHorizontal: vw(6),
+    },
+    paywallUpgradeButton: {
+      backgroundColor: '#2cbbc1',
+      borderRadius: 999,
+      minHeight: moderateScale(62),
       width: '100%',
       alignItems: 'center',
       justifyContent: 'center',
-      marginTop: vh(1.4),
-      marginBottom: vh(1.8),
+      marginTop: 0,
+      marginBottom: 0,
       shadowColor: '#000000',
-      shadowOpacity: 0.15,
+      shadowOpacity: 0.1,
       shadowRadius: 8,
       shadowOffset: { width: 0, height: 4 },
       elevation: 4,
@@ -2065,28 +2235,33 @@ function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }, 
     paywallUpgradeWrap: {
       width: '100%',
       alignItems: 'center',
-      marginTop: vh(1.4),
-      marginBottom: vh(1.8),
-    },
-    paywallPriceText: {
-      marginTop: vh(0.8),
-      color: '#1f4048',
-      fontSize: responsiveFont(14, 12, 16),
-      lineHeight: responsiveFont(18, 15, 20),
-      fontWeight: '600',
+      marginTop: vh(2.6),
+      marginBottom: vh(2),
     },
     paywallUpgradeText: {
       color: '#ffffff',
-      fontSize: responsiveFont(18, 15, 20),
-      lineHeight: responsiveFont(22, 18, 24),
-      fontWeight: '600',
+      fontSize: responsiveFont(19, 15, 20),
+      lineHeight: responsiveFont(24, 18, 25),
+      fontWeight: '500',
     },
     paywallMaybeLaterText: {
-      color: '#2e5060',
-      fontSize: responsiveFont(16, 14, 18),
-      lineHeight: responsiveFont(20, 17, 22),
+      color: '#40454b',
+      fontSize: responsiveFont(17, 14, 18),
+      lineHeight: responsiveFont(22, 18, 24),
       fontWeight: '400',
-      textDecorationLine: 'underline',
+    },
+    paywallSecurityRow: {
+      marginTop: vh(2.6),
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: moderateScale(24),
+    },
+    paywallSecurityIcon: {
+      width: moderateScale(34),
+      height: moderateScale(34),
+      resizeMode: 'contain',
+      tintColor: '#a3a3a3',
     },
 
     // -------------------------------------------------------------------------

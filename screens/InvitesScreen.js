@@ -17,8 +17,10 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { BlurView } from 'expo-blur';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
+  getEntitlements,
   getPassedProfiles,
   getReceivedInvites,
   getSavedProfiles,
@@ -30,6 +32,7 @@ import {
 } from '../utils/backendAuth';
 import { getCurrentFirebaseIdToken } from '../utils/firebaseAuth';
 import { useResponsiveMetrics } from '../utils/responsive';
+import { logAnalyticsEvent } from '../utils/swipeMonetization';
 import { withPlatformFontStyles } from '../utils/typography';
 import InviteListCard from '../components/invites/InviteListCard';
 import InvitesEmptyState from '../components/invites/InvitesEmptyState';
@@ -44,6 +47,8 @@ const TAB_PASSED = 'passed';
 const PAGE_LIMIT = 20;
 const CACHE_TTL_MS = 60 * 1000;
 const ACCEPT_MESSAGE_LIMIT = 1000;
+const PLAN_FREE = 'free';
+const PLAN_PREMIUM = 'premium';
 
 const TABS = [
   { key: TAB_INVITATIONS, label: 'Invitations' },
@@ -287,6 +292,9 @@ function createTabState() {
     error: '',
     nextCursor: null,
     hasMore: true,
+    planTier: '',
+    paywallRequired: false,
+    remainingUnlocksToday: null,
   };
 }
 
@@ -312,6 +320,8 @@ function normalizeInvitations(items = []) {
       roleTagsText: normalizeTags(profile?.role_tags) || 'Operations, Product, Sales/Marketing',
       readAt: invite?.read_at || null,
       status: safeText(invite?.status, 'pending').toLowerCase(),
+      isLocked: typeof row?.is_locked === 'boolean' ? row.is_locked : (typeof row?.isLocked === 'boolean' ? row.isLocked : null),
+      lockReason: safeText(row?.lock_reason || row?.lockReason),
       ...detailFields,
     };
   });
@@ -338,6 +348,8 @@ function normalizeSent(items = []) {
       timeCommitment: safeText(profile?.time_commitment, 'Already full-time on a startup'),
       roleTagsText: normalizeTags(profile?.role_tags) || 'Design, Operations, Product, Sales/Marketing',
       status: safeText(invite?.status, 'pending').toLowerCase(),
+      isLocked: typeof row?.is_locked === 'boolean' ? row.is_locked : (typeof row?.isLocked === 'boolean' ? row.isLocked : null),
+      lockReason: safeText(row?.lock_reason || row?.lockReason),
       ...detailFields,
     };
   });
@@ -362,6 +374,8 @@ function normalizeSaved(items = []) {
       intentBadge: safeText(profile?.intent_badge, 'Looking for a cofounder to join existing idea'),
       timeCommitment: safeText(profile?.time_commitment, 'Ready to go full-time in the next year'),
       roleTagsText: normalizeTags(profile?.role_tags) || 'Operations, Product, Sales/Marketing',
+      isLocked: typeof row?.is_locked === 'boolean' ? row.is_locked : (typeof row?.isLocked === 'boolean' ? row.isLocked : null),
+      lockReason: safeText(row?.lock_reason || row?.lockReason),
       ...detailFields,
     };
   });
@@ -386,6 +400,8 @@ function normalizePassed(items = []) {
       intentBadge: safeText(profile?.intent_badge, 'Looking for a cofounder to join existing idea'),
       timeCommitment: safeText(profile?.time_commitment, 'Ready to go full-time with the right co-founder'),
       roleTagsText: normalizeTags(profile?.role_tags) || 'AI/ML, Design, Engineering',
+      isLocked: typeof row?.is_locked === 'boolean' ? row.is_locked : (typeof row?.isLocked === 'boolean' ? row.isLocked : null),
+      lockReason: safeText(row?.lock_reason || row?.lockReason),
       ...detailFields,
     };
   });
@@ -417,7 +433,71 @@ function mapInviteItemToPassed(item = {}) {
   };
 }
 
-export default function InvitesScreen({ firebaseToken = '', onAuthExpired, onNavigate }) {
+function normalizePlanTier(value) {
+  const tier = safeText(value).toLowerCase();
+  if (tier === PLAN_FREE || tier === PLAN_PREMIUM) {
+    return tier;
+  }
+
+  return '';
+}
+
+function resolveLockedState(item = {}, tabState = {}, entitlementTier = '') {
+  if (typeof item?.isLocked === 'boolean') {
+    return item.isLocked;
+  }
+
+  const planTier = normalizePlanTier(tabState?.planTier) || normalizePlanTier(entitlementTier);
+  if (planTier === PLAN_FREE) {
+    return true;
+  }
+
+  if (tabState?.paywallRequired === true) {
+    return true;
+  }
+
+  return false;
+}
+
+function LockedDetailPlaceholders({ styles }) {
+  return (
+    <View style={styles.lockedContentWrap}>
+      <View style={styles.lockedPlaceholderCard}>
+        <View style={[styles.lockedPlaceholderLine, styles.lockedPlaceholderTitle]} />
+        <View style={[styles.lockedPlaceholderLine, styles.lockedPlaceholderLineWide]} />
+        <View style={[styles.lockedPlaceholderLine, styles.lockedPlaceholderLineMedium]} />
+        <View style={[styles.lockedPlaceholderLine, styles.lockedPlaceholderLineShort]} />
+      </View>
+
+      <View style={styles.lockedPlaceholderCard}>
+        <View style={[styles.lockedPlaceholderLine, styles.lockedPlaceholderTitle]} />
+        <View style={[styles.lockedPlaceholderRow, styles.lockedPlaceholderRowSpaced]}>
+          <View style={styles.lockedPlaceholderIcon} />
+          <View style={styles.lockedPlaceholderRowBody}>
+            <View style={[styles.lockedPlaceholderLine, styles.lockedPlaceholderLineMedium]} />
+            <View style={[styles.lockedPlaceholderLine, styles.lockedPlaceholderLineShort]} />
+          </View>
+        </View>
+        <View style={[styles.lockedPlaceholderRow, styles.lockedPlaceholderRowSpaced]}>
+          <View style={styles.lockedPlaceholderIcon} />
+          <View style={styles.lockedPlaceholderRowBody}>
+            <View style={[styles.lockedPlaceholderLine, styles.lockedPlaceholderLineWide]} />
+            <View style={[styles.lockedPlaceholderLine, styles.lockedPlaceholderLineShort]} />
+          </View>
+        </View>
+      </View>
+
+      <View style={styles.lockedPlaceholderCardTall}>
+        <View style={[styles.lockedPlaceholderLine, styles.lockedPlaceholderTitle]} />
+        <View style={[styles.lockedPlaceholderLine, styles.lockedPlaceholderLineWide]} />
+        <View style={[styles.lockedPlaceholderLine, styles.lockedPlaceholderLineWide]} />
+        <View style={[styles.lockedPlaceholderLine, styles.lockedPlaceholderLineMedium]} />
+      </View>
+    </View>
+  );
+}
+
+export default function InvitesScreen({ firebaseToken = '', onAuthExpired, onNavigate, upgradeUnlockSignal = 0 }) {
   const metrics = useResponsiveMetrics();
   const insets = useSafeAreaInsets();
   const styles = useMemo(() => createStyles(metrics, insets), [metrics, insets.top, insets.bottom]);
@@ -430,6 +510,8 @@ export default function InvitesScreen({ firebaseToken = '', onAuthExpired, onNav
   const [isAcceptModalVisible, setIsAcceptModalVisible] = useState(false);
   const [acceptanceMessage, setAcceptanceMessage] = useState('');
   const [acceptanceError, setAcceptanceError] = useState('');
+  const [entitlementTier, setEntitlementTier] = useState('');
+  const [isEntitlementLoading, setIsEntitlementLoading] = useState(true);
   const [tabsState, setTabsState] = useState({
     [TAB_INVITATIONS]: createTabState(),
     [TAB_SENT]: createTabState(),
@@ -440,6 +522,8 @@ export default function InvitesScreen({ firebaseToken = '', onAuthExpired, onNav
   const appStateRef = useRef(AppState.currentState);
   const tabsStateRef = useRef(tabsState);
   const snackbarTimeoutRef = useRef(null);
+  const lockedImpressionsRef = useRef(new Set());
+  const pendingUnlockedViewRef = useRef(false);
   const loadedAtRef = useRef({
     [TAB_INVITATIONS]: 0,
     [TAB_SENT]: 0,
@@ -450,6 +534,12 @@ export default function InvitesScreen({ firebaseToken = '', onAuthExpired, onNav
   useEffect(() => {
     tabsStateRef.current = tabsState;
   }, [tabsState]);
+
+  useEffect(() => {
+    if (upgradeUnlockSignal > 0) {
+      pendingUnlockedViewRef.current = true;
+    }
+  }, [upgradeUnlockSignal]);
 
   useEffect(() => () => {
     if (snackbarTimeoutRef.current) {
@@ -478,6 +568,28 @@ export default function InvitesScreen({ firebaseToken = '', onAuthExpired, onNav
     const token = await getCurrentFirebaseIdToken(false).catch(() => firebaseToken);
     return requestFn(token);
   }, [firebaseToken]);
+
+  const loadEntitlements = useCallback(async ({ silent = false } = {}) => {
+    if (!silent) {
+      setIsEntitlementLoading(true);
+    }
+
+    try {
+      const payload = await withToken((token) => getEntitlements(token));
+      setEntitlementTier(normalizePlanTier(payload?.tier || payload?.plan_tier));
+    } catch (error) {
+      if (isAuthError(error)) {
+        onAuthExpired?.();
+        return;
+      }
+
+      setEntitlementTier('');
+    } finally {
+      if (!silent) {
+        setIsEntitlementLoading(false);
+      }
+    }
+  }, [onAuthExpired, withToken]);
 
   const patchTabState = useCallback((tabKey, patch) => {
     setTabsState((prev) => ({
@@ -571,6 +683,9 @@ export default function InvitesScreen({ firebaseToken = '', onAuthExpired, onNav
             error: '',
             nextCursor: payload?.nextCursor || null,
             hasMore: Boolean(payload?.hasMore),
+            planTier: normalizePlanTier(payload?.planTier),
+            paywallRequired: Boolean(payload?.paywallRequired),
+            remainingUnlocksToday: payload?.remainingUnlocksToday ?? null,
           },
         };
       });
@@ -593,8 +708,9 @@ export default function InvitesScreen({ firebaseToken = '', onAuthExpired, onNav
 
   useEffect(() => {
     void registerTokenIfAvailable();
+    void loadEntitlements();
     void loadTabData({ tabKey: TAB_INVITATIONS, force: true });
-  }, [loadTabData, registerTokenIfAvailable]);
+  }, [loadEntitlements, loadTabData, registerTokenIfAvailable]);
 
   useEffect(() => {
     void loadTabData({ tabKey: activeTab });
@@ -606,12 +722,13 @@ export default function InvitesScreen({ firebaseToken = '', onAuthExpired, onNav
       appStateRef.current = nextState;
 
       if (nextState === 'active' && wasBackground) {
+        void loadEntitlements({ silent: true });
         void loadTabData({ tabKey: activeTab, force: true });
       }
     });
 
     return () => subscription.remove();
-  }, [activeTab, loadTabData]);
+  }, [activeTab, loadEntitlements, loadTabData]);
 
   const handleInviteAction = useCallback(async (item, action, acceptanceMessage = '') => {
     if (!item?.inviteId) {
@@ -662,7 +779,17 @@ export default function InvitesScreen({ firebaseToken = '', onAuthExpired, onNav
     }
   }, [onAuthExpired, patchTabState, withToken]);
 
+  const activeTabState = tabsState[activeTab] || createTabState();
+  const activePlanTier = normalizePlanTier(activeTabState.planTier) || normalizePlanTier(entitlementTier);
+  const selectedProfileLocked = false;
+  const selectedProfileLockReason = '';
+  const isListLocked = activePlanTier === PLAN_FREE || activeTabState.paywallRequired === true;
+
   const onInviteCardPress = useCallback((item) => {
+    if (isListLocked) {
+      return;
+    }
+
     setSelectedProfile(item || null);
 
     if (activeTab === TAB_INVITATIONS) {
@@ -694,7 +821,7 @@ export default function InvitesScreen({ firebaseToken = '', onAuthExpired, onNav
         }
       });
     }
-  }, [activeTab, onAuthExpired, patchTabState, withToken]);
+  }, [activeTab, isListLocked, onAuthExpired, patchTabState, withToken]);
 
   const runCandidateAction = useCallback(async (item, action) => {
     if (!item?.candidateId) {
@@ -848,7 +975,7 @@ export default function InvitesScreen({ firebaseToken = '', onAuthExpired, onNav
     await runCandidateAction(selectedProfile, 'like');
   }, [activeTab, openAcceptModal, runCandidateAction, selectedProfile]);
 
-  const activeTabState = tabsState[activeTab] || createTabState();
+  
 
   const onRefresh = useCallback(() => {
     void loadTabData({ tabKey: activeTab, refresh: true, force: true });
@@ -869,6 +996,52 @@ export default function InvitesScreen({ firebaseToken = '', onAuthExpired, onNav
   const shouldShowSaveAction = activeTab !== TAB_INVITATIONS && activeTab !== TAB_PASSED;
   const trimmedAcceptanceMessage = String(acceptanceMessage || '').trim();
   const isSendAcceptanceDisabled = isDetailActionLoading || !trimmedAcceptanceMessage;
+
+  useEffect(() => {
+    if (!selectedProfile || !selectedProfileLocked) {
+      return;
+    }
+
+    const impressionKey = `${activeTab}:${selectedProfile.key}:${selectedProfileLockReason || 'locked'}`;
+    if (lockedImpressionsRef.current.has(impressionKey)) {
+      return;
+    }
+
+    lockedImpressionsRef.current.add(impressionKey);
+    logAnalyticsEvent('invitation_locked_impression', {
+      tab: activeTab,
+      lock_reason: selectedProfileLockReason || 'premium_required',
+    });
+  }, [activeTab, selectedProfile, selectedProfileLockReason, selectedProfileLocked]);
+
+  useEffect(() => {
+    if (!selectedProfile || selectedProfileLocked || !pendingUnlockedViewRef.current) {
+      return;
+    }
+
+    logAnalyticsEvent('invitation_unlocked_view', {
+      tab: activeTab,
+      invitation_id: selectedProfile.inviteId || selectedProfile.savedId || selectedProfile.passedId || selectedProfile.key,
+    });
+    pendingUnlockedViewRef.current = false;
+  }, [activeTab, selectedProfile, selectedProfileLocked]);
+
+  const handleUpgradePress = useCallback(() => {
+    const sourceItem = selectedProfile || activeTabState.items?.[0] || null;
+    const invitationId = sourceItem?.inviteId || sourceItem?.savedId || sourceItem?.passedId || sourceItem?.key;
+
+    logAnalyticsEvent('invitation_upgrade_cta_click', {
+      tab: activeTab,
+      invitation_id: invitationId,
+    });
+
+    onNavigate?.({
+      tab: 'sync',
+      openPaywall: true,
+      source: 'invites',
+      invitationId,
+    });
+  }, [activeTab, onNavigate, selectedProfile]);
 
   const inviteAcceptanceModal = (
     <Modal
@@ -1031,169 +1204,171 @@ export default function InvitesScreen({ firebaseToken = '', onAuthExpired, onNav
             {!!selectedProfile.bio && <Text style={styles.heroBioText}>{selectedProfile.bio}</Text>}
           </View>
 
-          <View style={styles.detailIdeaCard}>
-            <Text style={styles.detailIdeaTitle}>My idea</Text>
-            <Text style={styles.detailIdeaBody}>{ideaText}</Text>
-          </View>
-
-          <View style={styles.detailFounderCard}>
-            <Text style={styles.detailSectionTitle}>As a founder, I am...</Text>
-
-            <View style={styles.founderRow}>
-              <Image source={require('../assets/search.png')} style={styles.detailIcon} />
-              <Text style={styles.detailText}>{founderIntentText}</Text>
+          <>
+            <View style={styles.detailIdeaCard}>
+              <Text style={styles.detailIdeaTitle}>My idea</Text>
+              <Text style={styles.detailIdeaBody}>{ideaText}</Text>
             </View>
-            <View style={styles.founderDivider} />
 
-            {!!commitmentText && (
-              <>
-                <View style={styles.founderRow}>
-                  <Image source={require('../assets/teamwork.png')} style={styles.detailIcon} />
-                  <Text style={styles.detailText}>{commitmentText}</Text>
-                </View>
-                <View style={styles.founderDivider} />
-              </>
-            )}
+            <View style={styles.detailFounderCard}>
+              <Text style={styles.detailSectionTitle}>As a founder, I am...</Text>
 
-            <View style={styles.founderRow}>
-              <Image source={require('../assets/internship.png')} style={styles.detailIcon} />
-              <Text style={styles.detailText}>{selectedProfile.roleTagsText}</Text>
-            </View>
-            <View style={styles.founderDivider} />
-
-            {!!ageText && (
               <View style={styles.founderRow}>
-                <Image source={require('../assets/user.png')} style={styles.detailIcon} />
-                <Text style={styles.detailText}>{ageText}</Text>
+                <Image source={require('../assets/search.png')} style={styles.detailIcon} />
+                <Text style={styles.detailText}>{founderIntentText}</Text>
               </View>
-            )}
-          </View>
+              <View style={styles.founderDivider} />
 
-          {selectedProfile.industries.length > 0 && (
-            <View style={styles.detailBadgeSection}>
-              <Text style={styles.detailSectionTitle}>Industries & interests</Text>
-              <View style={styles.badgesWrap}>
-                {selectedProfile.industries.map((industry) => (
-                  <View key={`ind-${selectedProfile.key}-${industry}`} style={styles.primaryBadge}>
-                    <Text style={styles.primaryBadgeText}>{industry}</Text>
+              {!!commitmentText && (
+                <>
+                  <View style={styles.founderRow}>
+                    <Image source={require('../assets/teamwork.png')} style={styles.detailIcon} />
+                    <Text style={styles.detailText}>{commitmentText}</Text>
                   </View>
-                ))}
+                  <View style={styles.founderDivider} />
+                </>
+              )}
+
+              <View style={styles.founderRow}>
+                <Image source={require('../assets/internship.png')} style={styles.detailIcon} />
+                <Text style={styles.detailText}>{selectedProfile.roleTagsText}</Text>
               </View>
-            </View>
-          )}
+              <View style={styles.founderDivider} />
 
-          {selectedProfile.startupExperiences.length > 0 && (
-            <View style={styles.detailBadgeSection}>
-              <Text style={styles.detailSectionTitle}>Startup experience</Text>
-              <View style={styles.badgesWrap}>
-                {selectedProfile.startupExperiences.map((entry) => (
-                  <View key={`startup-${selectedProfile.key}-${entry}`} style={styles.primaryBadge}>
-                    <Text style={styles.primaryBadgeText}>{entry}</Text>
-                  </View>
-                ))}
-              </View>
-            </View>
-          )}
-
-          {selectedProfile.workPreferences.length > 0 && (
-            <View style={styles.detailBadgeSection}>
-              <Text style={styles.detailSectionTitle}>Work Preferences</Text>
-              <View style={styles.badgesWrap}>
-                {selectedProfile.workPreferences.map((entry) => (
-                  <View key={`work-${selectedProfile.key}-${entry}`} style={styles.primaryBadge}>
-                    <Text style={styles.primaryBadgeText}>{entry}</Text>
-                  </View>
-                ))}
-              </View>
-            </View>
-          )}
-
-          {!!selectedProfile.motivation && (
-            <View style={styles.detailSectionCard}>
-              <Text style={styles.detailSectionTitle}>My motivation to build a startup</Text>
-              <Text style={styles.detailSectionBody}>{selectedProfile.motivation}</Text>
-            </View>
-          )}
-
-          {!!selectedProfile.superpower && (
-            <View style={styles.detailSectionCard}>
-              <Text style={styles.detailSectionTitle}>My strength / superpower</Text>
-              <Text style={styles.detailSectionBody}>{selectedProfile.superpower}</Text>
-            </View>
-          )}
-
-          {hasExperienceSection && (
-            <View style={styles.detailSectionCard}>
-              <Text style={styles.detailSectionTitle}>Experiences</Text>
-              {selectedProfile.linkedinExperiences.length > 0 ? (
-                selectedProfile.linkedinExperiences.map((experience, index) => (
-                  <View
-                    key={`${experience?.company || 'company'}-${experience?.title || 'title'}-${index}`}
-                    style={[
-                      styles.experienceListItem,
-                      index < selectedProfile.linkedinExperiences.length - 1 && styles.experienceListItemBorder,
-                    ]}
-                  >
-                    <Image source={require('../assets/briefcase.png')} style={styles.experienceCardIcon} />
-                    <View style={styles.experienceCardBody}>
-                      {!!safeText(experience?.title) && <Text style={styles.expTitle}>{safeText(experience?.title)}</Text>}
-                      {!!safeText(experience?.company) && <Text style={styles.expCompany}>{safeText(experience?.company)}</Text>}
-                      {!!safeText(experience?.duration) && <Text style={styles.expMeta}>{safeText(experience?.duration)}</Text>}
-                      {!!safeText(experience?.description) && <Text style={styles.expDescription} numberOfLines={3}>{safeText(experience?.description)}</Text>}
-                    </View>
-                  </View>
-                ))
-              ) : (
-                <Text style={styles.detailSectionBody}>{selectedProfile.experienceSummary || selectedProfile.title}</Text>
+              {!!ageText && (
+                <View style={styles.founderRow}>
+                  <Image source={require('../assets/user.png')} style={styles.detailIcon} />
+                  <Text style={styles.detailText}>{ageText}</Text>
+                </View>
               )}
             </View>
-          )}
 
-          {hasEducationSection && (
-            <View style={styles.detailSectionCard}>
-              <Text style={styles.detailSectionTitle}>Education</Text>
-              {selectedProfile.educationEntries.map((education, index) => {
-                const school = safeText(education?.school || education?.school_name || education?.institution);
-                const degree = safeText(education?.degree_name || education?.degree);
-                const field = safeText(education?.field_of_study || education?.field || education?.major);
-                const dateRange = safeText(
-                  education?.date_range
-                    || education?.duration
-                    || education?.dates
-                    || [
-                      [education?.start_month, education?.start_year].filter(Boolean).join(' '),
-                      [education?.end_month, education?.end_year].filter(Boolean).join(' '),
-                    ].filter(Boolean).join(' - ')
-                    || [education?.start_year, education?.end_year].filter(Boolean).join(' - '),
-                );
-
-                return (
-                  <View
-                    key={`${school || 'school'}-${degree || 'degree'}-${index}`}
-                    style={[
-                      styles.experienceListItem,
-                      index < selectedProfile.educationEntries.length - 1 && styles.experienceListItemBorder,
-                    ]}
-                  >
-                    <Image source={require('../assets/graduation.png')} style={styles.educationIcon} />
-                    <View style={styles.experienceCardBody}>
-                      {!!school && <Text style={styles.expTitle}>{school}</Text>}
-                      {!!degree && <Text style={styles.expCompany}>{degree}</Text>}
-                      {!!field && <Text style={styles.expDescription}>{field}</Text>}
-                      {!!dateRange && <Text style={styles.expMeta}>{dateRange}</Text>}
+            {selectedProfile.industries.length > 0 && (
+              <View style={styles.detailBadgeSection}>
+                <Text style={styles.detailSectionTitle}>Industries & interests</Text>
+                <View style={styles.badgesWrap}>
+                  {selectedProfile.industries.map((industry) => (
+                    <View key={`ind-${selectedProfile.key}-${industry}`} style={styles.primaryBadge}>
+                      <Text style={styles.primaryBadgeText}>{industry}</Text>
                     </View>
-                  </View>
-                );
-              })}
-            </View>
-          )}
+                  ))}
+                </View>
+              </View>
+            )}
 
-          {!!selectedProfile.passionAbout && (
-            <View style={styles.detailSectionCard}>
-              <Text style={styles.detailSectionTitle}>I'm passionate about</Text>
-              <Text style={styles.detailSectionBody}>{selectedProfile.passionAbout}</Text>
-            </View>
-          )}
+            {selectedProfile.startupExperiences.length > 0 && (
+              <View style={styles.detailBadgeSection}>
+                <Text style={styles.detailSectionTitle}>Startup experience</Text>
+                <View style={styles.badgesWrap}>
+                  {selectedProfile.startupExperiences.map((entry) => (
+                    <View key={`startup-${selectedProfile.key}-${entry}`} style={styles.primaryBadge}>
+                      <Text style={styles.primaryBadgeText}>{entry}</Text>
+                    </View>
+                  ))}
+                </View>
+              </View>
+            )}
+
+            {selectedProfile.workPreferences.length > 0 && (
+              <View style={styles.detailBadgeSection}>
+                <Text style={styles.detailSectionTitle}>Work Preferences</Text>
+                <View style={styles.badgesWrap}>
+                  {selectedProfile.workPreferences.map((entry) => (
+                    <View key={`work-${selectedProfile.key}-${entry}`} style={styles.primaryBadge}>
+                      <Text style={styles.primaryBadgeText}>{entry}</Text>
+                    </View>
+                  ))}
+                </View>
+              </View>
+            )}
+
+            {!!selectedProfile.motivation && (
+              <View style={styles.detailSectionCard}>
+                <Text style={styles.detailSectionTitle}>My motivation to build a startup</Text>
+                <Text style={styles.detailSectionBody}>{selectedProfile.motivation}</Text>
+              </View>
+            )}
+
+            {!!selectedProfile.superpower && (
+              <View style={styles.detailSectionCard}>
+                <Text style={styles.detailSectionTitle}>My strength / superpower</Text>
+                <Text style={styles.detailSectionBody}>{selectedProfile.superpower}</Text>
+              </View>
+            )}
+
+            {hasExperienceSection && (
+              <View style={styles.detailSectionCard}>
+                <Text style={styles.detailSectionTitle}>Experiences</Text>
+                {selectedProfile.linkedinExperiences.length > 0 ? (
+                  selectedProfile.linkedinExperiences.map((experience, index) => (
+                    <View
+                      key={`${experience?.company || 'company'}-${experience?.title || 'title'}-${index}`}
+                      style={[
+                        styles.experienceListItem,
+                        index < selectedProfile.linkedinExperiences.length - 1 && styles.experienceListItemBorder,
+                      ]}
+                    >
+                      <Image source={require('../assets/briefcase.png')} style={styles.experienceCardIcon} />
+                      <View style={styles.experienceCardBody}>
+                        {!!safeText(experience?.title) && <Text style={styles.expTitle}>{safeText(experience?.title)}</Text>}
+                        {!!safeText(experience?.company) && <Text style={styles.expCompany}>{safeText(experience?.company)}</Text>}
+                        {!!safeText(experience?.duration) && <Text style={styles.expMeta}>{safeText(experience?.duration)}</Text>}
+                        {!!safeText(experience?.description) && <Text style={styles.expDescription} numberOfLines={3}>{safeText(experience?.description)}</Text>}
+                      </View>
+                    </View>
+                  ))
+                ) : (
+                  <Text style={styles.detailSectionBody}>{selectedProfile.experienceSummary || selectedProfile.title}</Text>
+                )}
+              </View>
+            )}
+
+            {hasEducationSection && (
+              <View style={styles.detailSectionCard}>
+                <Text style={styles.detailSectionTitle}>Education</Text>
+                {selectedProfile.educationEntries.map((education, index) => {
+                  const school = safeText(education?.school || education?.school_name || education?.institution);
+                  const degree = safeText(education?.degree_name || education?.degree);
+                  const field = safeText(education?.field_of_study || education?.field || education?.major);
+                  const dateRange = safeText(
+                    education?.date_range
+                      || education?.duration
+                      || education?.dates
+                      || [
+                        [education?.start_month, education?.start_year].filter(Boolean).join(' '),
+                        [education?.end_month, education?.end_year].filter(Boolean).join(' '),
+                      ].filter(Boolean).join(' - ')
+                      || [education?.start_year, education?.end_year].filter(Boolean).join(' - '),
+                  );
+
+                  return (
+                    <View
+                      key={`${school || 'school'}-${degree || 'degree'}-${index}`}
+                      style={[
+                        styles.experienceListItem,
+                        index < selectedProfile.educationEntries.length - 1 && styles.experienceListItemBorder,
+                      ]}
+                    >
+                      <Image source={require('../assets/graduation.png')} style={styles.educationIcon} />
+                      <View style={styles.experienceCardBody}>
+                        {!!school && <Text style={styles.expTitle}>{school}</Text>}
+                        {!!degree && <Text style={styles.expCompany}>{degree}</Text>}
+                        {!!field && <Text style={styles.expDescription}>{field}</Text>}
+                        {!!dateRange && <Text style={styles.expMeta}>{dateRange}</Text>}
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
+            )}
+
+            {!!selectedProfile.passionAbout && (
+              <View style={styles.detailSectionCard}>
+                <Text style={styles.detailSectionTitle}>I'm passionate about</Text>
+                <Text style={styles.detailSectionBody}>{selectedProfile.passionAbout}</Text>
+              </View>
+            )}
+          </>
 
           <View style={styles.detailBottomSpacer} />
         </ScrollView>
@@ -1245,7 +1420,7 @@ export default function InvitesScreen({ firebaseToken = '', onAuthExpired, onNav
       {!!actionError && <Text style={styles.actionErrorText}>{actionError}</Text>}
 
       <View style={styles.bodyWrap}>
-        {activeTabState.isLoading && activeTabState.items.length === 0 ? (
+        {((activeTabState.isLoading && activeTabState.items.length === 0) || (isEntitlementLoading && activeTabState.items.length === 0)) ? (
           <InvitesLoadingSkeleton styles={styles} />
         ) : activeTabState.error && activeTabState.items.length === 0 ? (
           <InvitesErrorState
@@ -1259,6 +1434,28 @@ export default function InvitesScreen({ firebaseToken = '', onAuthExpired, onNav
             styles={styles}
             onRetry={() => loadTabData({ tabKey: activeTab, refresh: true, force: true })}
           />
+        ) : isListLocked ? (
+          <View style={styles.lockedListWrap}>
+            <View pointerEvents="none" style={styles.lockedListScrollWrap}>
+              <FlatList
+                data={activeTabState.items}
+                keyExtractor={(item) => item.key}
+                renderItem={({ item }) => (
+                  <InviteListCard item={item} tabKey={activeTab} styles={styles} onPress={onInviteCardPress} />
+                )}
+                contentContainerStyle={styles.listContentWrap}
+                showsVerticalScrollIndicator={false}
+                scrollEnabled={false}
+              />
+            </View>
+            <BlurView intensity={55} tint="light" style={styles.lockedListBlur} />
+            <View style={styles.lockedListOverlayCard}>
+              <Pressable style={styles.lockedListUpgradeButton} onPress={handleUpgradePress}>
+                <Text style={styles.lockedListUpgradeButtonText}>Upgrade</Text>
+              </Pressable>
+              <Text style={styles.lockedListOverlayText}>Subscribe to see your invitations</Text>
+            </View>
+          </View>
         ) : (
           <FlatList
             data={activeTabState.items}
@@ -1499,6 +1696,61 @@ function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }, 
       fontSize: responsiveFont(20, 16, 22),
       lineHeight: responsiveFont(29, 23, 32),
       fontWeight: '700',
+    },
+    lockedHeroBioMask: {
+      marginTop: moderateScale(10),
+      gap: moderateScale(8),
+    },
+    lockedListWrap: {
+      flex: 1,
+      position: 'relative',
+      overflow: 'hidden',
+    },
+    lockedListScrollWrap: {
+      flex: 1,
+    },
+    lockedListBlur: {
+      ...StyleSheet.absoluteFillObject,
+    },
+    lockedListOverlayCard: {
+      position: 'absolute',
+      left: moderateScale(16),
+      right: moderateScale(16),
+      bottom: moderateScale(18),
+      borderRadius: moderateScale(22),
+      backgroundColor: '#ffffff',
+      paddingHorizontal: moderateScale(16),
+      paddingVertical: moderateScale(16),
+      flexDirection: 'row',
+      alignItems: 'center',
+      shadowColor: '#000000',
+      shadowOpacity: 0.08,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 6 },
+      elevation: 5,
+      zIndex: 4,
+      gap: moderateScale(14),
+    },
+    lockedListUpgradeButton: {
+      minHeight: moderateScale(42),
+      borderRadius: 999,
+      backgroundColor: '#2cbbc1',
+      paddingHorizontal: moderateScale(22),
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    lockedListUpgradeButtonText: {
+      color: '#ffffff',
+      fontSize: responsiveFont(17, 14, 18),
+      lineHeight: responsiveFont(21, 17, 22),
+      fontWeight: '500',
+    },
+    lockedListOverlayText: {
+      flex: 1,
+      color: '#111111',
+      fontSize: responsiveFont(16, 14, 18),
+      lineHeight: responsiveFont(23, 19, 24),
+      fontWeight: '400',
     },
     detailIdeaCard: {
       borderRadius: moderateScale(24),
@@ -1809,6 +2061,20 @@ function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }, 
       fontSize: responsiveFont(15, 13, 16),
       lineHeight: responsiveFont(20, 17, 21),
       fontWeight: '400',
+    },
+    lockBadge: {
+      alignSelf: 'flex-start',
+      marginTop: moderateScale(6),
+      borderRadius: 999,
+      backgroundColor: '#f4e5c9',
+      paddingHorizontal: moderateScale(10),
+      paddingVertical: moderateScale(4),
+    },
+    lockBadgeText: {
+      color: '#6a5230',
+      fontSize: responsiveFont(12, 10, 13),
+      lineHeight: responsiveFont(16, 13, 17),
+      fontWeight: '700',
     },
     detailRow: {
       marginTop: moderateScale(9),

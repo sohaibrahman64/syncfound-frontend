@@ -83,6 +83,15 @@ function normalizeListPayload(payload) {
         : typeof payload?.hasMore === "boolean"
           ? payload.hasMore
           : Boolean(payload?.next_cursor ?? payload?.nextCursor),
+      planTier: String(payload?.plan_tier ?? payload?.planTier ?? "").trim(),
+      paywallRequired:
+        typeof payload?.paywall_required === "boolean"
+          ? payload.paywall_required
+          : typeof payload?.paywallRequired === "boolean"
+            ? payload.paywallRequired
+            : false,
+      remainingUnlocksToday:
+        payload?.remaining_unlocks_today ?? payload?.remainingUnlocksToday ?? null,
   };
 }
 
