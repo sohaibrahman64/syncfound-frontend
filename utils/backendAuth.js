@@ -189,7 +189,7 @@ function extractUploadedImageUri(payload) {
  * Step 1 handoff only: send Firebase idToken to backend.
  * Backend verification and JWT issuance are handled server-side in later steps.
  */
-export async function sendFirebaseIdTokenToBackend(idToken, phone_number) {
+export async function sendFirebaseIdTokenToBackend(idToken, phone_number, country_id) {
   const response = await fetch(`${API_BASE_URL}${FIREBASE_LOGIN_PATH}`, {
     method: "POST",
     headers: {
@@ -199,6 +199,7 @@ export async function sendFirebaseIdTokenToBackend(idToken, phone_number) {
       firebaseToken: idToken,
       idToken,
       phone_number,
+      country_id,
     }),
   });
 

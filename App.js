@@ -374,7 +374,11 @@ export default function App() {
                 }
               } else {
                 try {
-                  const backendResponse = await sendFirebaseIdTokenToBackend(idToken, verifiedPhoneNumber || otpPhoneDisplay);
+                  const backendResponse = await sendFirebaseIdTokenToBackend(
+                    idToken,
+                    verifiedPhoneNumber || otpPhoneDisplay,
+                    selectedCountry?.id,
+                  );
                   console.log('FastAPI token handoff success:', backendResponse);
                   console.log('Verified phone:', verifiedPhoneNumber);
                   setVerifiedPhoneNumber(verifiedPhoneNumber || otpPhoneDisplay);
