@@ -21,6 +21,21 @@ import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 // ---------------------------------------------------------------------------
 jest.mock('../utils/backendAuth', () => ({
   getEntitlements: jest.fn().mockResolvedValue({ tier: 'free', unlimited_swipes: false }),
+  getPricingPlans: jest.fn().mockResolvedValue({
+    currency_code: 'USD',
+    plans: [
+      {
+        id: 3,
+        code: 'premium_usd_monthly',
+        name: 'Premium Plan Monthly (US)',
+        tier: 'premium',
+        currency_code: 'USD',
+        price_minor: 999,
+        billing_interval_months: 1,
+        is_active: true,
+      },
+    ],
+  }),
   getMyMatches: jest.fn().mockResolvedValue({
     items: [
       {
@@ -51,14 +66,41 @@ jest.mock('../utils/firebaseAuth', () => ({
   getCurrentFirebaseIdToken: jest.fn().mockResolvedValue('mock-firebase-token'),
 }));
 
+jest.mock('react-native-safe-area-context', () => {
+  const actual = jest.requireActual('react-native-safe-area-context');
+
+  return {
+    ...actual,
+    useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
+  };
+});
+
+jest.mock('react-native-webview', () => {
+  const ReactLocal = require('react');
+  const { View: ViewLocal } = require('react-native');
+
+  const MockWebView = ReactLocal.forwardRef((props, ref) => (
+    <ViewLocal
+      {...props}
+      ref={ref}
+      testID={props.testID || 'mock-webview'}
+    />
+  ));
+
+  return {
+    WebView: MockWebView,
+    default: MockWebView,
+  };
+});
+
 // Silence Animated warnings in tests
-jest.mock('react-native/Libraries/Animated/NativeAnimatedHelper');
+jest.mock('react-native/Libraries/Animated/NativeAnimatedHelper', () => ({}), { virtual: true });
 
 // ---------------------------------------------------------------------------
 // After mocks are in place, import the component under test
 // ---------------------------------------------------------------------------
 import HomeScreen from '../screens/HomeScreen';
-import { postMatchAction } from '../utils/backendAuth';
+import { getPricingPlans, postMatchAction } from '../utils/backendAuth';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -102,6 +144,21 @@ describe('HomeScreen — swipe monetization', () => {
     jest.clearAllMocks();
     // Default: successful pass action
     postMatchAction.mockResolvedValue(PASS_RESPONSE);
+    getPricingPlans.mockResolvedValue({
+      currency_code: 'USD',
+      plans: [
+        {
+          id: 3,
+          code: 'premium_usd_monthly',
+          name: 'Premium Plan Monthly (US)',
+          tier: 'premium',
+          currency_code: 'USD',
+          price_minor: 999,
+          billing_interval_months: 1,
+          is_active: true,
+        },
+      ],
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -128,6 +185,41 @@ describe('HomeScreen — swipe monetization', () => {
         queryByText(/Daily Matchmaking/i) ||
         queryByText(/Capped at 10 Swipes/i),
       ).not.toBeNull();
+    });
+  });
+
+  it('shows INR symbol and converted amount for Indian paywall pricing', async () => {
+    getPricingPlans.mockResolvedValueOnce({
+      user_id: 123,
+      user_country_id: 101,
+      india_country_id: 101,
+      is_indian_user: true,
+      currency_code: 'INR',
+      plans: [
+        {
+          id: 1,
+          code: 'premium_inr_monthly',
+          name: 'Premium Plan Monthly (IN)',
+          tier: 'premium',
+          currency_code: 'INR',
+          price_minor: 94873,
+          billing_interval_months: 1,
+          is_active: true,
+        },
+      ],
+    });
+    postMatchAction.mockResolvedValue(PAYWALL_RESPONSE);
+
+    const { getByText, findByText } = renderHomeScreen();
+    await findByText('Alice Founder');
+
+    await act(async () => {
+      fireEvent.press(getByText('Alice Founder').parent.parent);
+    });
+
+    await waitFor(() => {
+      expect(getByText('₹')).toBeTruthy();
+      expect(getByText('948.73')).toBeTruthy();
     });
   });
 

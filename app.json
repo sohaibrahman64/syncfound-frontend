@@ -2,6 +2,7 @@
   "expo": {
     "name": "syncfound-mobile-frontend",
     "slug": "syncfound-mobile-frontend",
+    "scheme": "syncfound",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -17,6 +18,70 @@
     "android": {
       "buildArchitectures": [
         "arm64-v8a"
+      ],
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": false,
+          "data": [
+            {
+              "scheme": "syncfound",
+              "host": "expo-development-client"
+            }
+          ],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
+        },
+        {
+          "action": "VIEW",
+          "autoVerify": false,
+          "data": [
+            {
+              "scheme": "syncfound",
+              "host": "chat"
+            }
+          ],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
+        },
+        {
+          "action": "VIEW",
+          "autoVerify": false,
+          "data": [
+            {
+              "scheme": "syncfound",
+              "host": "payment"
+            }
+          ],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
+        },
+        {
+          "action": "VIEW",
+          "autoVerify": false,
+          "data": [
+            {
+              "scheme": "syncfound",
+              "host": "payment",
+              "pathPrefix": "/success"
+            },
+            {
+              "scheme": "syncfound",
+              "host": "payment",
+              "pathPrefix": "/failure"
+            }
+          ],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
+        }
       ],
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",

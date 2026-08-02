@@ -5,8 +5,10 @@ import {
   Animated,
   FlatList,
   Image,
+  Linking,
   Modal,
   PanResponder,
+  Platform,
   Pressable,
   SafeAreaView,
   ScrollView,
@@ -17,7 +19,15 @@ import {
 } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
-import { getEntitlements, getInviteCounts, getMyMatches, getPricingPlans, postMatchAction } from '../utils/backendAuth';
+import { WebView } from 'react-native-webview';
+import {
+  createBillingCheckoutSession,
+  getEntitlements,
+  getInviteCounts,
+  getMyMatches,
+  getPricingPlans,
+  postMatchAction,
+} from '../utils/backendAuth';
 import { getCurrentFirebaseIdToken } from '../utils/firebaseAuth';
 import { listChats } from '../utils/chatApi';
 import { subscribeToChatPushEvents } from '../utils/chatPushEvents';
@@ -41,6 +51,244 @@ const TAB_INVITES = 'invites';
 const TAB_SYNC = 'sync';
 const TAB_CHAT = 'chat';
 const TAB_PROFILE = 'profile';
+
+function resolveCurrencySymbol(currencyCode) {
+  return String(currencyCode || '').trim().toUpperCase() === 'INR' ? '₹' : '$';
+}
+
+function resolvePlanCode(plan) {
+  return String(plan?.plan_code || plan?.code || '').trim();
+}
+
+function formatMinorAmount(amountMinor, currencyCode) {
+  const safeMinor = Number(amountMinor);
+  if (!Number.isFinite(safeMinor)) {
+    return '0.00';
+  }
+
+  const amountMajor = safeMinor / 100;
+  try {
+    return new Intl.NumberFormat('en-US', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(amountMajor);
+  } catch {
+    return amountMajor.toFixed(2);
+  }
+}
+
+function resolveProviderPayloadUrl(providerPayload) {
+  if (!providerPayload || typeof providerPayload !== 'object') {
+    return '';
+  }
+
+  const candidates = [
+    providerPayload.action_url,
+    providerPayload.checkout_url,
+    providerPayload.payment_url,
+    providerPayload.redirect_url,
+    providerPayload.hosted_checkout_url,
+  ];
+
+  for (const candidate of candidates) {
+    const normalized = String(candidate || '').trim();
+    if (normalized) {
+      return normalized;
+    }
+  }
+
+  return '';
+}
+
+function resolveProviderPayloadPostData(providerPayload) {
+  if (!providerPayload || typeof providerPayload !== 'object') {
+    return '';
+  }
+
+  const candidates = [
+    providerPayload.post_data,
+    providerPayload.postData,
+    providerPayload.request_body,
+    providerPayload.body,
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && candidate.length > 0) {
+      return candidate;
+    }
+  }
+
+  return '';
+}
+
+function resolveProviderPayloadFlow(providerPayload) {
+  if (!providerPayload || typeof providerPayload !== 'object') {
+    return '';
+  }
+
+  return String(providerPayload?.flow || '').trim().toLowerCase();
+}
+
+function resolveProviderPayloadUserAgent(providerPayload) {
+  if (!providerPayload || typeof providerPayload !== 'object') {
+    return '';
+  }
+
+  const candidates = [
+    providerPayload.user_agent,
+    providerPayload.userAgent,
+  ];
+
+  for (const candidate of candidates) {
+    const normalized = String(candidate || '').trim();
+    if (normalized) {
+      return normalized;
+    }
+  }
+
+  return '';
+}
+
+function resolveIntentFallbackUrl(url) {
+  const rawUrl = String(url || '').trim();
+  if (!rawUrl) {
+    return '';
+  }
+
+  const marker = 'browser_fallback_url=';
+  const markerIndex = rawUrl.indexOf(marker);
+  if (markerIndex < 0) {
+    return '';
+  }
+
+  const fallbackPart = rawUrl.slice(markerIndex + marker.length);
+  const value = fallbackPart.split(';')[0] || fallbackPart;
+  try {
+    return decodeURIComponent(String(value || '').trim());
+  } catch {
+    return String(value || '').trim();
+  }
+}
+
+function parseUrlQueryParams(url) {
+  const rawUrl = String(url || '').trim();
+  if (!rawUrl) {
+    return {};
+  }
+
+  try {
+    const parsed = new URL(rawUrl);
+    const pairs = parsed.searchParams.entries();
+    const result = {};
+    for (const [key, value] of pairs) {
+      result[String(key || '').trim()] = String(value || '').trim();
+    }
+    return result;
+  } catch {
+    const queryString = rawUrl.split('?')[1] || '';
+    if (!queryString) {
+      return {};
+    }
+
+    return queryString
+      .split('&')
+      .filter(Boolean)
+      .reduce((acc, pair) => {
+        const [rawKey, rawValue = ''] = pair.split('=');
+        const key = decodeURIComponent(String(rawKey || '').trim());
+        if (!key) {
+          return acc;
+        }
+        acc[key] = decodeURIComponent(String(rawValue || '').trim());
+        return acc;
+      }, {});
+  }
+}
+
+function delayMs(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function escapeHtml(value) {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function resolveFormEntriesFromPostData(postData) {
+  const params = new URLSearchParams(String(postData || ''));
+  return Array.from(params.entries()).map(([key, value]) => [String(key || ''), String(value || '')]);
+}
+
+function buildPayUAutoSubmitHtml(actionUrl, postData) {
+  const entries = resolveFormEntriesFromPostData(postData);
+  const fieldsMarkup = entries
+    .map(([key, value]) => (`<input type="hidden" name="${escapeHtml(key)}" value="${escapeHtml(value)}" />`))
+    .join('');
+
+  return `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Redirecting to PayU</title>
+    <style>
+      body { font-family: sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; color: #1f2937; }
+    </style>
+  </head>
+  <body>
+    <form id="payuCheckoutForm" method="POST" action="${escapeHtml(actionUrl)}">${fieldsMarkup}</form>
+    <p>Redirecting to secure payment...</p>
+    <script>
+      var form = document.getElementById('payuCheckoutForm');
+      if (form) {
+        form.submit();
+      }
+    </script>
+  </body>
+</html>`;
+}
+
+function submitPayUCheckoutOnWeb(actionUrl, postData) {
+  if (typeof document === 'undefined') {
+    return { didSubmit: false, openedInNewTab: false };
+  }
+
+  let targetName = '_self';
+  let openedInNewTab = false;
+
+  if (typeof window !== 'undefined') {
+    const popupName = `payuCheckout_${Date.now()}`;
+    const popupWindow = window.open('', popupName);
+    if (popupWindow) {
+      targetName = popupName;
+      openedInNewTab = true;
+    }
+  }
+
+  const form = document.createElement('form');
+  form.method = 'POST';
+  form.action = actionUrl;
+  form.target = targetName;
+  form.style.display = 'none';
+
+  const entries = resolveFormEntriesFromPostData(postData);
+  for (const [key, value] of entries) {
+    const input = document.createElement('input');
+    input.type = 'hidden';
+    input.name = key;
+    input.value = value;
+    form.appendChild(input);
+  }
+
+  document.body.appendChild(form);
+  form.submit();
+  form.remove();
+  return { didSubmit: true, openedInNewTab };
+}
 
 function resolveFlagSource(countryCode) {
   const normalized = String(countryCode || '').trim().toLowerCase();
@@ -291,6 +539,7 @@ export default function HomeScreen({
   onAuthExpired,
   backendUserId = '',
   chatNotificationLaunch = null,
+  onPaymentReturnUrl = null,
 }) {
   const metrics = useResponsiveMetrics();
   const insets = useSafeAreaInsets();
@@ -329,6 +578,19 @@ export default function HomeScreen({
   const [resumedAfterPaywall, setResumedAfterPaywall] = useState(false);
   const [entitlements, setEntitlements] = useState(null);
   const [pricingPlans, setPricingPlans] = useState([]);
+  const [paywallPricing, setPaywallPricing] = useState(null);
+  const [isPricingLoading, setIsPricingLoading] = useState(false);
+  const [pricingErrorMessage, setPricingErrorMessage] = useState('');
+  const [selectedPlanCode, setSelectedPlanCode] = useState('');
+  const [isCheckoutLoading, setIsCheckoutLoading] = useState(false);
+  const [isCheckoutVerifying, setIsCheckoutVerifying] = useState(false);
+  const [checkoutErrorMessage, setCheckoutErrorMessage] = useState('');
+  const [checkoutInfoMessage, setCheckoutInfoMessage] = useState('');
+  const [checkoutWebViewVisible, setCheckoutWebViewVisible] = useState(false);
+  const [checkoutWebViewSource, setCheckoutWebViewSource] = useState(null);
+  const [checkoutWebViewUserAgent, setCheckoutWebViewUserAgent] = useState('');
+  const [lastCheckoutSession, setLastCheckoutSession] = useState(null);
+  const lastHandledReturnSignatureRef = useRef('');
   const resumeActionCountRef = useRef(0);
   const invitesUpgradeRequestedRef = useRef(false);
   // Holds the card-advance callback to execute once the interstitial is dismissed
@@ -575,14 +837,38 @@ export default function HomeScreen({
   }, [firebaseToken]);
 
   const fetchPricingPlans = useCallback(async () => {
+    setIsPricingLoading(true);
+    setPricingErrorMessage('');
     try {
       const token = await getCurrentFirebaseIdToken(false).catch(() => firebaseToken);
-      const plans = await getPricingPlans(token);
-      setPricingPlans(Array.isArray(plans) ? plans : []);
-    } catch {
+      const pricing = await getPricingPlans(token);
+      setPaywallPricing(pricing || null);
+      const plans = Array.isArray(pricing?.plans) ? pricing.plans : [];
+      setPricingPlans(plans);
+      setSelectedPlanCode((prev) => {
+        if (prev && plans.some((plan) => resolvePlanCode(plan) === prev)) {
+          return prev;
+        }
+        return resolvePlanCode(plans[0]);
+      });
+    } catch (error) {
+      const isAuthError =
+        error?.status === 401 ||
+        /invalid firebase token|unauthori[sz]ed|token/i.test(String(error?.message || ''));
+
+      if (isAuthError) {
+        onAuthExpired?.();
+        return;
+      }
+
+      setPaywallPricing(null);
       setPricingPlans([]);
+      setSelectedPlanCode('');
+      setPricingErrorMessage(error?.message || 'Could not load pricing plans. Please try again.');
+    } finally {
+      setIsPricingLoading(false);
     }
-  }, [firebaseToken]);
+  }, [firebaseToken, onAuthExpired]);
 
   useEffect(() => {
     fetchEntitlements();
@@ -634,24 +920,329 @@ export default function HomeScreen({
     return unsubscribe;
   }, [fetchUnreadBadges]);
 
-  const premiumPlan = useMemo(
-    () => pricingPlans.find((plan) => String(plan?.tier || '').toLowerCase() === 'premium') || null,
-    [pricingPlans],
-  );
-
-  const premiumPriceAmount = useMemo(() => {
-    const priceMinor = Number(premiumPlan?.price_minor);
-    if (!Number.isFinite(priceMinor)) {
-      return '9.99';
+  const selectedPricingPlan = useMemo(() => {
+    if (!Array.isArray(pricingPlans) || pricingPlans.length === 0) {
+      return null;
     }
 
-    return (priceMinor / 100).toFixed(2);
-  }, [premiumPlan]);
+    const match = pricingPlans.find((plan) => resolvePlanCode(plan) === selectedPlanCode);
+    return match || pricingPlans[0] || null;
+  }, [pricingPlans, selectedPlanCode]);
 
-  const premiumCurrencySymbol = useMemo(() => {
-    const currencyCode = String(premiumPlan?.currency_code || 'USD').toUpperCase();
-    return currencyCode === 'USD' ? '$' : currencyCode;
-  }, [premiumPlan]);
+  const paywallCurrencyCode = useMemo(() => {
+    const fallback = String(paywallPricing?.currency_code || '').trim().toUpperCase();
+    const selected = String(selectedPricingPlan?.currency_code || '').trim().toUpperCase();
+    return selected || fallback || 'USD';
+  }, [paywallPricing?.currency_code, selectedPricingPlan?.currency_code]);
+
+  const paywallCurrencySymbol = useMemo(
+    () => resolveCurrencySymbol(paywallCurrencyCode),
+    [paywallCurrencyCode],
+  );
+
+  const paywallPriceAmount = useMemo(
+    () => formatMinorAmount(selectedPricingPlan?.amount_minor ?? selectedPricingPlan?.price_minor, paywallCurrencyCode),
+    [paywallCurrencyCode, selectedPricingPlan?.amount_minor, selectedPricingPlan?.price_minor],
+  );
+
+  const pollEntitlementsForCheckout = useCallback(async ({
+    returnStatus = '',
+    maxAttempts = 6,
+    intervalMs = 2500,
+  } = {}) => {
+    const normalizedStatus = String(returnStatus || '').trim().toLowerCase();
+
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      try {
+        const token = await getCurrentFirebaseIdToken(false).catch(() => firebaseToken);
+        const entitlementsPayload = await getEntitlements(token);
+        setEntitlements(entitlementsPayload);
+
+        const tier = String(entitlementsPayload?.tier || entitlementsPayload?.plan_tier || '').trim().toLowerCase();
+        if (tier === 'premium') {
+          return { isPremium: true, entitlementsPayload };
+        }
+      } catch (error) {
+        const isAuthError =
+          error?.status === 401 ||
+          /invalid firebase token|unauthori[sz]ed|token/i.test(String(error?.message || ''));
+
+        if (isAuthError) {
+          onAuthExpired?.();
+          return { isPremium: false, aborted: true };
+        }
+      }
+
+      if ((normalizedStatus === 'failed' || normalizedStatus === 'cancelled') && attempt >= 0) {
+        break;
+      }
+
+      if (attempt < maxAttempts - 1) {
+        await delayMs(intervalMs);
+      }
+    }
+
+    return { isPremium: false };
+  }, [firebaseToken, onAuthExpired]);
+
+  const handleHostedReturn = useCallback(async (url) => {
+    const params = parseUrlQueryParams(url);
+    const checkoutSessionId = String(params?.checkout_session_id || '').trim();
+    const returnStatus = String(params?.status || '').trim().toLowerCase();
+
+    if (!checkoutSessionId || !returnStatus) {
+      return;
+    }
+
+    setCheckoutWebViewVisible(false);
+    setCheckoutWebViewSource(null);
+    setCheckoutWebViewUserAgent('');
+
+    const signature = `${checkoutSessionId}:${returnStatus}:${String(params?.txnid || '').trim()}`;
+    if (lastHandledReturnSignatureRef.current === signature) {
+      return;
+    }
+    lastHandledReturnSignatureRef.current = signature;
+
+    const currentSessionId = String(lastCheckoutSession?.checkout_session_id || '').trim();
+    if (currentSessionId && currentSessionId !== checkoutSessionId) {
+      setCheckoutErrorMessage('Payment return session mismatch. Please retry from paywall.');
+    }
+
+    setPaywallVisible(true);
+    setCheckoutErrorMessage('');
+    setCheckoutInfoMessage('Verifying payment status...');
+    setIsCheckoutVerifying(true);
+
+    const result = await pollEntitlementsForCheckout({ returnStatus });
+
+    setIsCheckoutVerifying(false);
+    if (result?.aborted) {
+      return;
+    }
+
+    if (result?.isPremium) {
+      setCheckoutInfoMessage('Payment verified. Premium access is now active.');
+      setCheckoutErrorMessage('');
+      setPaywallVisible(false);
+      return;
+    }
+
+    const errorCode = String(params?.error_code || '').trim();
+    const errorMessage = String(params?.error_message || '').trim();
+
+    if (returnStatus === 'failed') {
+      setCheckoutInfoMessage('');
+      setCheckoutErrorMessage(errorMessage || `Payment failed${errorCode ? ` (${errorCode})` : ''}. Please try again.`);
+      return;
+    }
+
+    if (returnStatus === 'cancelled') {
+      setCheckoutInfoMessage('');
+      setCheckoutErrorMessage(errorMessage || 'Payment was cancelled.');
+      return;
+    }
+
+    if (returnStatus === 'pending') {
+      setCheckoutErrorMessage('');
+      setCheckoutInfoMessage('Payment is pending confirmation. Premium access will unlock once entitlement is updated.');
+      return;
+    }
+
+    setCheckoutInfoMessage('');
+    setCheckoutErrorMessage('Payment could not be verified yet. Please retry shortly.');
+  }, [lastCheckoutSession?.checkout_session_id, pollEntitlementsForCheckout]);
+
+  const isCheckoutReturnUrl = useCallback((url) => {
+    const params = parseUrlQueryParams(url);
+    const checkoutSessionId = String(params?.checkout_session_id || '').trim();
+    const returnStatus = String(params?.status || '').trim().toLowerCase();
+    return Boolean(checkoutSessionId && returnStatus);
+  }, []);
+
+  const handleCheckoutWebViewClose = useCallback(() => {
+    setCheckoutWebViewVisible(false);
+    setCheckoutWebViewSource(null);
+    setCheckoutWebViewUserAgent('');
+    setCheckoutInfoMessage('');
+    setCheckoutErrorMessage('Payment was cancelled before completion.');
+  }, []);
+
+  const handleCheckoutExternalIntent = useCallback((url) => {
+    const nextUrl = String(url || '').trim();
+    if (!nextUrl) {
+      return false;
+    }
+
+    const normalized = nextUrl.toLowerCase();
+    const isExternalIntent =
+      normalized.startsWith('intent://') ||
+      normalized.startsWith('upi://') ||
+      (!normalized.startsWith('http://') && !normalized.startsWith('https://') && !normalized.startsWith('about:'));
+
+    if (!isExternalIntent) {
+      return false;
+    }
+
+    void (async () => {
+      try {
+        const supported = await Linking.canOpenURL(nextUrl);
+        if (supported) {
+          await Linking.openURL(nextUrl);
+          return;
+        }
+      } catch {
+        // Fall through to fallback URL handling
+      }
+
+      const fallbackUrl = resolveIntentFallbackUrl(nextUrl);
+      if (fallbackUrl) {
+        setCheckoutWebViewSource({ uri: fallbackUrl });
+      }
+    })();
+
+    return true;
+  }, []);
+
+  const handleCheckoutReturnRouting = useCallback((url) => {
+    const nextUrl = String(url || '').trim();
+    if (!nextUrl) {
+      return;
+    }
+
+    setCheckoutWebViewVisible(false);
+    setCheckoutWebViewSource(null);
+    setCheckoutWebViewUserAgent('');
+
+    if (typeof onPaymentReturnUrl === 'function') {
+      onPaymentReturnUrl(nextUrl);
+      return;
+    }
+
+    void handleHostedReturn(nextUrl);
+  }, [handleHostedReturn, onPaymentReturnUrl]);
+
+  useEffect(() => {
+    if (typeof onPaymentReturnUrl === 'function') {
+      return undefined;
+    }
+
+    const subscription = Linking.addEventListener('url', ({ url }) => {
+      void handleHostedReturn(url);
+    });
+
+    Linking.getInitialURL()
+      .then((url) => {
+        if (url) {
+          void handleHostedReturn(url);
+        }
+      })
+      .catch(() => {
+        // Ignore initial URL read errors
+      });
+
+    return () => subscription.remove();
+  }, [handleHostedReturn, onPaymentReturnUrl]);
+
+  const launchPayUCheckout = useCallback(async (checkoutSession) => {
+    const providerPayload = checkoutSession?.provider_payload;
+    if (!providerPayload) {
+      throw new Error('Payment initialization failed. Missing PayU provider payload.');
+    }
+
+    const flow = resolveProviderPayloadFlow(providerPayload);
+    if (flow !== 'webview_post') {
+      throw new Error('Payment initialization failed. Unsupported PayU flow returned by backend.');
+    }
+
+    const actionUrl = String(providerPayload?.action_url || checkoutSession?.checkout_url || '').trim();
+    const postData = resolveProviderPayloadPostData(providerPayload);
+    if (!actionUrl || !postData) {
+      throw new Error('Payment initialization failed. Missing PayU action_url or post_data.');
+    }
+
+    if (Platform.OS === 'web') {
+      const submitResult = submitPayUCheckoutOnWeb(actionUrl, postData);
+      if (!submitResult?.didSubmit) {
+        throw new Error('Could not open PayU checkout in browser. Please try again.');
+      }
+
+      setCheckoutInfoMessage(
+        submitResult.openedInNewTab
+          ? 'Checkout opened in a new tab. Complete payment and return to the app for verification.'
+          : 'Checkout opened. Complete payment and return to the app for verification.',
+      );
+      return;
+    }
+
+    setCheckoutWebViewUserAgent(resolveProviderPayloadUserAgent(providerPayload));
+    setCheckoutWebViewSource({
+      html: buildPayUAutoSubmitHtml(actionUrl, postData),
+      baseUrl: actionUrl,
+    });
+    setCheckoutWebViewVisible(true);
+  }, []);
+
+  const handleUpgradeNow = useCallback(async () => {
+    if (!selectedPricingPlan || isCheckoutLoading || isCheckoutVerifying) {
+      return;
+    }
+
+    const planCode = resolvePlanCode(selectedPricingPlan);
+    if (!planCode) {
+      setCheckoutErrorMessage('Please select a valid plan before continuing.');
+      return;
+    }
+
+    setIsCheckoutLoading(true);
+    setCheckoutErrorMessage('');
+    setCheckoutInfoMessage('');
+
+    try {
+      const token = await getCurrentFirebaseIdToken(false).catch(() => firebaseToken);
+      const checkoutSession = await createBillingCheckoutSession({
+        firebaseToken: token,
+        planCode,
+      });
+
+      setLastCheckoutSession(checkoutSession);
+      logAnalyticsEvent('billing_checkout_session_created', {
+        checkoutSessionId: checkoutSession.checkout_session_id,
+        provider: checkoutSession.provider,
+        currencyCode: checkoutSession.currency_code,
+        amountMinor: checkoutSession.amount_minor,
+      });
+
+      if (checkoutSession.provider !== 'payu') {
+        throw new Error('Checkout is temporarily limited to PayU. Please try again later.');
+      }
+
+      await launchPayUCheckout(checkoutSession);
+      if (Platform.OS !== 'web') {
+        setCheckoutInfoMessage('Checkout opened. Complete payment and return to the app for verification.');
+      }
+    } catch (error) {
+      const isAuthError =
+        error?.status === 401 ||
+        /invalid firebase token|unauthori[sz]ed|token/i.test(String(error?.message || ''));
+
+      if (isAuthError) {
+        onAuthExpired?.();
+        return;
+      }
+
+      setCheckoutErrorMessage(error?.message || 'Could not start checkout. Please try again.');
+    } finally {
+      setIsCheckoutLoading(false);
+    }
+  }, [
+    firebaseToken,
+    isCheckoutLoading,
+    isCheckoutVerifying,
+    launchPayUCheckout,
+    onAuthExpired,
+    selectedPricingPlan,
+  ]);
 
   // ---------------------------------------------------------------------------
   // Unified swipe action handler — used by all four entry points:
@@ -1175,6 +1766,86 @@ export default function HomeScreen({
       {/* Paywall modal — shown when backend returns paywall_required=true    */}
       {/* ------------------------------------------------------------------ */}
       <Modal
+        visible={checkoutWebViewVisible}
+        transparent={false}
+        animationType="slide"
+        onRequestClose={handleCheckoutWebViewClose}
+      >
+        <SafeAreaView style={styles.checkoutWebViewContainer}>
+          <View style={styles.checkoutWebViewHeader}>
+            <Text style={styles.checkoutWebViewTitle}>Complete Payment</Text>
+            <Pressable onPress={handleCheckoutWebViewClose} hitSlop={10}>
+              <Text style={styles.checkoutWebViewCloseText}>Close</Text>
+            </Pressable>
+          </View>
+
+          {checkoutWebViewSource ? (
+            <WebView
+              source={checkoutWebViewSource}
+              startInLoadingState
+              javaScriptEnabled
+              domStorageEnabled
+              setSupportMultipleWindows
+              javaScriptCanOpenWindowsAutomatically
+              mixedContentMode="always"
+              userAgent={checkoutWebViewUserAgent || undefined}
+              injectedJavaScriptBeforeContentLoaded={"sessionStorage.setItem('payuHandleIntent', true);sessionStorage.setItem('payuCBVersion','1.0.0'); true;"}
+              onShouldStartLoadWithRequest={(request) => {
+                const nextUrl = String(request?.url || '').trim();
+                if (isCheckoutReturnUrl(nextUrl)) {
+                  handleCheckoutReturnRouting(nextUrl);
+                  return false;
+                }
+
+                if (handleCheckoutExternalIntent(nextUrl)) {
+                  return false;
+                }
+                return true;
+              }}
+              onNavigationStateChange={(state) => {
+                const nextUrl = String(state?.url || '').trim();
+                if (!nextUrl) {
+                  return;
+                }
+
+                if (isCheckoutReturnUrl(nextUrl)) {
+                  handleCheckoutReturnRouting(nextUrl);
+                }
+              }}
+              onOpenWindow={(event) => {
+                const targetUrl = String(event?.nativeEvent?.targetUrl || '').trim();
+                if (!targetUrl) {
+                  return;
+                }
+
+                if (isCheckoutReturnUrl(targetUrl)) {
+                  handleCheckoutReturnRouting(targetUrl);
+                  return;
+                }
+
+                if (handleCheckoutExternalIntent(targetUrl)) {
+                  return;
+                }
+
+                setCheckoutWebViewSource({ uri: targetUrl });
+              }}
+              onError={() => {
+                setCheckoutWebViewVisible(false);
+                setCheckoutWebViewSource(null);
+                setCheckoutWebViewUserAgent('');
+                setCheckoutInfoMessage('');
+                setCheckoutErrorMessage('Could not load payment page. Please try again.');
+              }}
+            />
+          ) : (
+            <View style={styles.checkoutWebViewLoadingWrap}>
+              <ActivityIndicator size="large" color="#2cbbc1" />
+            </View>
+          )}
+        </SafeAreaView>
+      </Modal>
+
+      <Modal
         visible={paywallVisible}
         transparent={false}
         animationType="slide"
@@ -1267,19 +1938,97 @@ export default function HomeScreen({
               <View style={styles.paywallBottomDecor} />
               <Text style={styles.paywallBottomTitle}>Premium Membership</Text>
 
+              {isPricingLoading ? (
+                <View style={styles.paywallStatusWrap}>
+                  <ActivityIndicator size="small" color="#2cbbc1" />
+                  <Text style={styles.paywallStatusText}>Loading plans...</Text>
+                </View>
+              ) : pricingErrorMessage ? (
+                <View style={styles.paywallStatusWrap}>
+                  <Text style={styles.paywallStatusErrorText}>{pricingErrorMessage}</Text>
+                  <Pressable style={styles.paywallRetryButton} onPress={fetchPricingPlans}>
+                    <Text style={styles.paywallRetryButtonText}>Retry</Text>
+                  </Pressable>
+                </View>
+              ) : pricingPlans.length === 0 ? (
+                <View style={styles.paywallStatusWrap}>
+                  <Text style={styles.paywallStatusText}>No plans available right now.</Text>
+                  <Pressable style={styles.paywallRetryButton} onPress={fetchPricingPlans}>
+                    <Text style={styles.paywallRetryButtonText}>Refresh</Text>
+                  </Pressable>
+                </View>
+              ) : (
+                <View style={styles.paywallPlansList}>
+                  {pricingPlans.map((plan) => {
+                    const planCode = resolvePlanCode(plan);
+                    const isSelected = selectedPlanCode === planCode;
+                    const planCurrencyCode = String(plan?.currency_code || paywallCurrencyCode).trim().toUpperCase();
+                    const planCurrencySymbol = resolveCurrencySymbol(planCurrencyCode);
+                    const planAmount = formatMinorAmount(plan?.amount_minor ?? plan?.price_minor, planCurrencyCode);
+                    const intervalMonths = Number(plan?.billing_interval_months);
+                    const planLabel = String(plan?.name || plan?.display_name || planCode || 'Premium Plan').trim();
+                    const intervalCopy = Number.isFinite(intervalMonths) && intervalMonths > 0
+                      ? `/ ${intervalMonths === 1 ? 'month' : `${intervalMonths} months`}`
+                      : '/ month';
+
+                    return (
+                      <Pressable
+                        key={planCode}
+                        style={[styles.paywallPlanOption, isSelected && styles.paywallPlanOptionActive]}
+                        onPress={() => {
+                          setSelectedPlanCode(planCode);
+                          setCheckoutErrorMessage('');
+                        }}
+                      >
+                        <Text style={styles.paywallPlanName}>{planLabel}</Text>
+                        <View style={styles.paywallPlanPriceRow}>
+                          <Text style={styles.paywallPlanPriceText}>{`${planCurrencySymbol}${planAmount}`}</Text>
+                          <Text style={styles.paywallPlanUnitText}>{intervalCopy}</Text>
+                        </View>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              )}
+
               <View style={styles.paywallPriceRow}>
-                <Text style={styles.paywallCurrencyText}>{premiumCurrencySymbol}</Text>
-                <Text style={styles.paywallPriceValue}>{premiumPriceAmount}</Text>
+                <Text style={styles.paywallCurrencyText}>{paywallCurrencySymbol}</Text>
+                <Text style={styles.paywallPriceValue}>{paywallPriceAmount}</Text>
                 <Text style={styles.paywallPriceUnit}>/ month</Text>
               </View>
 
               <Text style={styles.paywallBillingText}>Billed monthly. Cancel anytime with one click.</Text>
 
               <View style={styles.paywallUpgradeWrap}>
-                <Pressable style={styles.paywallUpgradeButton}>
-                  <Text style={styles.paywallUpgradeText}>Upgrade Now</Text>
+                <Pressable
+                  style={[
+                    styles.paywallUpgradeButton,
+                    (isCheckoutLoading || isCheckoutVerifying || !selectedPricingPlan) && styles.paywallUpgradeButtonDisabled,
+                  ]}
+                  onPress={handleUpgradeNow}
+                  disabled={isCheckoutLoading || isCheckoutVerifying || !selectedPricingPlan}
+                >
+                  {(isCheckoutLoading || isCheckoutVerifying) ? (
+                    <ActivityIndicator size="small" color="#ffffff" />
+                  ) : (
+                    <Text style={styles.paywallUpgradeText}>Upgrade Now</Text>
+                  )}
                 </Pressable>
               </View>
+
+              {!!checkoutErrorMessage && (
+                <Text style={styles.paywallCheckoutErrorText}>{checkoutErrorMessage}</Text>
+              )}
+
+              {!!checkoutInfoMessage && (
+                <Text style={styles.paywallCheckoutMetaText}>{checkoutInfoMessage}</Text>
+              )}
+
+              {!!lastCheckoutSession?.checkout_session_id && (
+                <Text style={styles.paywallCheckoutMetaText}>
+                  {`Session: ${lastCheckoutSession.checkout_session_id} | Provider: ${String(lastCheckoutSession.provider || '').toUpperCase()}`}
+                </Text>
+              )}
 
               <Pressable
                 hitSlop={12}
@@ -2181,6 +2930,84 @@ function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }, 
       lineHeight: responsiveFont(28, 23, 30),
       fontWeight: '700',
     },
+    paywallStatusWrap: {
+      marginTop: vh(1.6),
+      width: '100%',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: moderateScale(10),
+    },
+    paywallStatusText: {
+      color: '#556167',
+      textAlign: 'center',
+      fontSize: responsiveFont(15, 13, 17),
+      lineHeight: responsiveFont(20, 17, 22),
+      fontWeight: '400',
+    },
+    paywallStatusErrorText: {
+      color: '#b94f4f',
+      textAlign: 'center',
+      fontSize: responsiveFont(15, 13, 17),
+      lineHeight: responsiveFont(20, 17, 22),
+      fontWeight: '400',
+    },
+    paywallRetryButton: {
+      backgroundColor: '#e9f7f7',
+      borderRadius: 999,
+      paddingHorizontal: moderateScale(18),
+      minHeight: moderateScale(40),
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    paywallRetryButtonText: {
+      color: '#1f9ea7',
+      fontSize: responsiveFont(15, 13, 17),
+      lineHeight: responsiveFont(19, 16, 21),
+      fontWeight: '500',
+    },
+    paywallPlansList: {
+      marginTop: vh(1.8),
+      width: '100%',
+      gap: moderateScale(10),
+    },
+    paywallPlanOption: {
+      width: '100%',
+      borderRadius: moderateScale(16),
+      backgroundColor: '#f5fbfb',
+      borderWidth: 1,
+      borderColor: '#d7ecec',
+      paddingHorizontal: moderateScale(16),
+      paddingVertical: moderateScale(12),
+    },
+    paywallPlanOptionActive: {
+      backgroundColor: '#e9f7f7',
+      borderColor: '#2cbbc1',
+    },
+    paywallPlanName: {
+      color: '#27343a',
+      fontSize: responsiveFont(15, 13, 16),
+      lineHeight: responsiveFont(20, 17, 21),
+      fontWeight: '500',
+    },
+    paywallPlanPriceRow: {
+      marginTop: moderateScale(4),
+      flexDirection: 'row',
+      alignItems: 'flex-end',
+      gap: moderateScale(6),
+    },
+    paywallPlanPriceText: {
+      color: '#111111',
+      fontSize: responsiveFont(22, 18, 24),
+      lineHeight: responsiveFont(28, 23, 30),
+      fontWeight: '700',
+    },
+    paywallPlanUnitText: {
+      color: '#4b5960',
+      fontSize: responsiveFont(14, 12, 15),
+      lineHeight: responsiveFont(18, 15, 20),
+      fontWeight: '400',
+      marginBottom: moderateScale(2),
+    },
     paywallPriceRow: {
       marginTop: vh(2),
       flexDirection: 'row',
@@ -2232,6 +3059,9 @@ function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }, 
       shadowOffset: { width: 0, height: 4 },
       elevation: 4,
     },
+    paywallUpgradeButtonDisabled: {
+      opacity: 0.6,
+    },
     paywallUpgradeWrap: {
       width: '100%',
       alignItems: 'center',
@@ -2249,6 +3079,24 @@ function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }, 
       fontSize: responsiveFont(17, 14, 18),
       lineHeight: responsiveFont(22, 18, 24),
       fontWeight: '400',
+    },
+    paywallCheckoutErrorText: {
+      color: '#b94f4f',
+      textAlign: 'center',
+      fontSize: responsiveFont(14, 12, 16),
+      lineHeight: responsiveFont(19, 16, 22),
+      fontWeight: '400',
+      marginBottom: vh(1.3),
+      paddingHorizontal: vw(2),
+    },
+    paywallCheckoutMetaText: {
+      color: '#5c676d',
+      textAlign: 'center',
+      fontSize: responsiveFont(12, 10, 13),
+      lineHeight: responsiveFont(17, 14, 18),
+      fontWeight: '400',
+      marginBottom: vh(1.2),
+      paddingHorizontal: vw(2),
     },
     paywallSecurityRow: {
       marginTop: vh(2.6),
@@ -2319,6 +3167,37 @@ function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }, 
       fontSize: responsiveFont(16, 14, 18),
       lineHeight: responsiveFont(20, 17, 22),
       fontWeight: '500',
+    },
+    checkoutWebViewContainer: {
+      flex: 1,
+      backgroundColor: '#ffffff',
+    },
+    checkoutWebViewHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: vw(4.5),
+      paddingVertical: vh(1.4),
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: '#d9d9d9',
+      backgroundColor: '#f7fbfa',
+    },
+    checkoutWebViewTitle: {
+      color: '#1e2a30',
+      fontSize: responsiveFont(18, 15, 20),
+      lineHeight: responsiveFont(23, 18, 25),
+      fontWeight: '600',
+    },
+    checkoutWebViewCloseText: {
+      color: '#2cbbc1',
+      fontSize: responsiveFont(16, 14, 18),
+      lineHeight: responsiveFont(21, 17, 22),
+      fontWeight: '500',
+    },
+    checkoutWebViewLoadingWrap: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
     },
   }));
 }

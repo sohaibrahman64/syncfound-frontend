@@ -26,7 +26,10 @@ const USER_MATCHES_PATH =
 const USER_ENTITLEMENTS_PATH =
   process.env.EXPO_PUBLIC_USER_ENTITLEMENTS_PATH || "/users/me/entitlements";
 const PRICING_PLANS_PATH =
-  process.env.EXPO_PUBLIC_PRICING_PLANS_PATH || "/pricing/plans";
+  process.env.EXPO_PUBLIC_PRICING_PLANS_PATH || "/users/me/paywall/pricing";
+const BILLING_CHECKOUT_SESSION_PATH =
+  process.env.EXPO_PUBLIC_BILLING_CHECKOUT_SESSION_PATH ||
+  "/users/me/billing/checkout-session";
 const RECEIVED_INVITES_PATH =
   process.env.EXPO_PUBLIC_RECEIVED_INVITES_PATH || "/users/me/invites";
 const SENT_INVITES_PATH =
@@ -413,6 +416,44 @@ function normalizeMatchesPayload(payload) {
   };
 }
 
+function normalizePaywallPricingPayload(payload) {
+  const normalizePlan = (plan) => {
+    const code = String(plan?.plan_code || plan?.code || "").trim();
+    const currencyCode = String(plan?.currency_code || "").trim().toUpperCase();
+    const amountMinor = Number(plan?.amount_minor ?? plan?.price_minor);
+
+    return {
+      ...plan,
+      plan_code: code,
+      code,
+      currency_code: currencyCode,
+      amount_minor: Number.isFinite(amountMinor) ? Math.round(amountMinor) : null,
+      price_minor: Number.isFinite(amountMinor) ? Math.round(amountMinor) : null,
+    };
+  };
+
+  if (Array.isArray(payload)) {
+    return {
+      plans: payload.map(normalizePlan).filter((plan) => Boolean(plan.plan_code)),
+      currency_code: "",
+      is_indian_user: false,
+      india_country_id: null,
+      user_country_id: null,
+    };
+  }
+
+  return {
+    user_id: payload?.user_id ?? null,
+    user_country_id: payload?.user_country_id ?? null,
+    india_country_id: payload?.india_country_id ?? null,
+    is_indian_user: Boolean(payload?.is_indian_user),
+    currency_code: String(payload?.currency_code || "").trim().toUpperCase(),
+    plans: Array.isArray(payload?.plans)
+      ? payload.plans.map(normalizePlan).filter((plan) => Boolean(plan.plan_code))
+      : [],
+  };
+}
+
 export async function getMyMatches({
   firebaseToken,
   getFirebaseToken,
@@ -621,14 +662,102 @@ export async function getPricingPlans(firebaseToken = "") {
   }
 
   if (Array.isArray(payload)) {
-    return payload;
+    return normalizePaywallPricingPayload(payload);
   }
 
   if (Array.isArray(payload?.data)) {
-    return payload.data;
+    return normalizePaywallPricingPayload({ ...payload, plans: payload.data });
   }
 
-  return [];
+  return normalizePaywallPricingPayload(payload || {});
+}
+
+export async function createBillingCheckoutSession({
+  firebaseToken = "",
+  planCode = "",
+} = {}) {
+  const normalizedPlanCode = String(planCode || "").trim();
+  if (!normalizedPlanCode) {
+    throw new Error("plan_code is required to initialize checkout.");
+  }
+
+  const headers = {
+    "Content-Type": "application/json",
+  };
+
+  if (firebaseToken) {
+    headers.Authorization = `Bearer ${firebaseToken}`;
+  }
+
+  const response = await fetch(`${API_BASE_URL}${BILLING_CHECKOUT_SESSION_PATH}`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ plan_code: normalizedPlanCode }),
+  });
+
+  let payload = null;
+  try {
+    payload = await response.json();
+  } catch {
+    payload = null;
+  }
+
+  if (!response.ok) {
+    const error = new Error(
+      payload?.detail ||
+        payload?.message ||
+        `Failed to initialize checkout with status ${response.status}`,
+    );
+    error.status = response.status;
+    error.payload = payload;
+    throw error;
+  }
+
+  const providerPayload = payload?.provider_payload && typeof payload.provider_payload === "object"
+    ? payload.provider_payload
+    : null;
+
+  const normalizedProviderPayload = providerPayload
+    ? {
+      ...providerPayload,
+      flow: String(providerPayload?.flow || "").trim().toLowerCase(),
+      method: String(providerPayload?.method || "").trim().toUpperCase(),
+      action_url: String(providerPayload?.action_url || providerPayload?.checkout_url || "").trim(),
+      post_data:
+        typeof providerPayload?.post_data === "string"
+          ? providerPayload.post_data
+          : typeof providerPayload?.postData === "string"
+            ? providerPayload.postData
+            : typeof providerPayload?.request_body === "string"
+              ? providerPayload.request_body
+              : typeof providerPayload?.body === "string"
+                ? providerPayload.body
+                : "",
+      txnid: String(providerPayload?.txnid || "").trim(),
+      surl: String(providerPayload?.surl || "").trim(),
+      furl: String(providerPayload?.furl || "").trim(),
+    }
+    : null;
+
+  return {
+    user_id: payload?.user_id ?? null,
+    user_country_id: payload?.user_country_id ?? null,
+    india_country_id: payload?.india_country_id ?? null,
+    is_indian_user: Boolean(payload?.is_indian_user),
+    provider: String(payload?.provider || "").trim().toLowerCase(),
+    plan_id: payload?.plan_id ?? null,
+    plan_code: String(payload?.plan_code || "").trim(),
+    amount_minor: Number.isFinite(Number(payload?.amount_minor))
+      ? Math.round(Number(payload?.amount_minor))
+      : null,
+    currency_code: String(payload?.currency_code || "").trim().toUpperCase(),
+    checkout_session_id: String(payload?.checkout_session_id || "").trim(),
+    checkout_status: String(payload?.checkout_status || "").trim().toLowerCase(),
+    checkout_url: String(payload?.checkout_url || payload?.payment_url || "").trim(),
+    provider_payload: normalizedProviderPayload,
+    message: String(payload?.message || "").trim(),
+    raw: payload,
+  };
 }
 
 export async function getReceivedInvites({

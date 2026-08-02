@@ -27,8 +27,11 @@ import EmailScreen from './screens/EmailScreen';
 import CofoundersIntroScreen from './screens/CofoundersIntroScreen';
 import ProfileWizardScreen from './screens/ProfileWizardScreen';
 import HomeScreen from './screens/HomeScreen';
+import PaymentSuccessScreen from './screens/PaymentSuccessScreen';
+import PaymentFailureScreen from './screens/PaymentFailureScreen';
 import { ProfileWizardProvider } from './context/ProfileWizardContext';
 import { getPlatformBaseFontFamily } from './utils/typography';
+import { parsePaymentCallbackFromUrl } from './utils/paymentCallback';
 
 let hasAppliedGlobalPlatformFontDefaults = false;
 const SESSION_STORAGE_KEY = '@syncfound/session';
@@ -110,6 +113,7 @@ export default function App() {
     initialMessageId: '',
     nonce: 0,
   });
+  const [paymentCallbackParams, setPaymentCallbackParams] = useState(null);
 
   const handleAuthExpired = useCallback(async () => {
     await deactivateCurrentDevicePushToken({
@@ -130,8 +134,32 @@ export default function App() {
       initialMessageId: '',
       nonce: 0,
     });
+    setPaymentCallbackParams(null);
     setCurrentScreen('splash');
   }, [firebaseToken]);
+
+  const routeFromIncomingUrl = useCallback((url) => {
+    const paymentRoute = parsePaymentCallbackFromUrl(url);
+    if (paymentRoute) {
+      setPaymentCallbackParams(paymentRoute.params);
+      setCurrentScreen(paymentRoute.screen);
+      return { handled: true, type: 'payment' };
+    }
+
+    const launch = parseChatLaunchFromUrl(url);
+    if (!launch) {
+      return { handled: false, type: '' };
+    }
+
+    setCurrentScreen('home');
+    setChatNotificationLaunch({
+      conversationId: launch.conversationId,
+      initialMessageId: launch.initialMessageId,
+      nonce: Date.now(),
+    });
+
+    return { handled: true, type: 'chat' };
+  }, []);
 
   const [fontsLoaded] = useFonts({
     PlusJakartaSans_400Regular,
@@ -151,55 +179,34 @@ export default function App() {
       return;
     }
 
-    const params = new URLSearchParams(window.location.search || '');
-    const conversationId = String(params.get('chat_conversation_id') || '').trim();
-    const initialMessageId = String(params.get('chat_message_id') || '').trim();
-    if (!conversationId) {
+    const routeResult = routeFromIncomingUrl(window.location.href);
+    if (routeResult?.type !== 'chat') {
       return;
     }
 
-    setChatNotificationLaunch({
-      conversationId,
-      initialMessageId,
-      nonce: Date.now(),
-    });
-
+    const params = new URLSearchParams(window.location.search || '');
     params.delete('chat_conversation_id');
     params.delete('chat_message_id');
     const nextQuery = params.toString();
     const nextUrl = `${window.location.pathname}${nextQuery ? `?${nextQuery}` : ''}${window.location.hash || ''}`;
     window.history.replaceState({}, '', nextUrl);
-  }, []);
+  }, [routeFromIncomingUrl]);
 
   useEffect(() => {
-    const consumeUrl = (url) => {
-      const launch = parseChatLaunchFromUrl(url);
-      if (!launch) {
-        return;
-      }
-
-      setCurrentScreen('home');
-      setChatNotificationLaunch({
-        conversationId: launch.conversationId,
-        initialMessageId: launch.initialMessageId,
-        nonce: Date.now(),
-      });
-    };
-
     Linking.getInitialURL().then((initialUrl) => {
       if (initialUrl) {
-        consumeUrl(initialUrl);
+        routeFromIncomingUrl(initialUrl);
       }
     }).catch(() => {});
 
     const subscription = Linking.addEventListener('url', ({ url }) => {
-      consumeUrl(url);
+      routeFromIncomingUrl(url);
     });
 
     return () => {
       subscription.remove();
     };
-  }, []);
+  }, [routeFromIncomingUrl]);
 
   useEffect(() => {
     if (!String(firebaseToken || '').trim()) {
@@ -267,8 +274,11 @@ export default function App() {
           setFirebaseToken(restoredToken);
         }
 
+        const isOnPaymentCallbackScreen =
+          currentScreen === 'paymentSuccess' || currentScreen === 'paymentFailure';
+
         const isProfileComplete = profileCompleteRaw === 'true';
-        if (isProfileComplete && restoredToken) {
+        if (!isOnPaymentCallbackScreen && isProfileComplete && restoredToken) {
           setCurrentScreen('home');
           return;
         }
@@ -280,7 +290,7 @@ export default function App() {
           const hasProgress =
             (saved.stepIndex != null && saved.stepIndex > 0) ||
             (saved.draft && Object.keys(saved.draft).length > 0);
-          if (hasProgress) {
+          if (hasProgress && !isOnPaymentCallbackScreen) {
             setCurrentScreen('profileWizard');
           }
         } catch {
@@ -288,7 +298,19 @@ export default function App() {
         }
       })
       .catch(() => {});
-  }, [fontsLoaded]);
+  }, [currentScreen, fontsLoaded]);
+
+  const handlePaymentContinue = useCallback(() => {
+    setCurrentScreen('home');
+  }, []);
+
+  const handlePaymentTryAgain = useCallback(() => {
+    setCurrentScreen('home');
+  }, []);
+
+  const handlePaymentReturnUrl = useCallback((url) => {
+    routeFromIncomingUrl(url);
+  }, [routeFromIncomingUrl]);
 
   if (!fontsLoaded) {
     return null;
@@ -484,6 +506,37 @@ export default function App() {
           onAuthExpired={handleAuthExpired}
           backendUserId={backendUserId}
           chatNotificationLaunch={chatNotificationLaunch}
+          onPaymentReturnUrl={handlePaymentReturnUrl}
+        />
+        <StatusBar style="dark" />
+      </>
+    );
+  }
+
+  if (currentScreen === 'paymentSuccess') {
+    return (
+      <>
+        <PaymentSuccessScreen
+          firebaseToken={firebaseToken}
+          callbackParams={paymentCallbackParams}
+          onContinue={handlePaymentContinue}
+          onTryAgain={handlePaymentTryAgain}
+          onAuthExpired={handleAuthExpired}
+        />
+        <StatusBar style="dark" />
+      </>
+    );
+  }
+
+  if (currentScreen === 'paymentFailure') {
+    return (
+      <>
+        <PaymentFailureScreen
+          firebaseToken={firebaseToken}
+          callbackParams={paymentCallbackParams}
+          onContinue={handlePaymentContinue}
+          onTryAgain={handlePaymentTryAgain}
+          onAuthExpired={handleAuthExpired}
         />
         <StatusBar style="dark" />
       </>
