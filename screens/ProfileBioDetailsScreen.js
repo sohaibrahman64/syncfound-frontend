@@ -13,7 +13,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useResponsiveMetrics } from '../utils/responsive';
 import { withPlatformFontStyles } from '../utils/typography';
-import { BASE_URL } from '../utils/Constants';
+import { apiFetch } from '../utils/apiClient';
 
 const FIELD_CONFIG = {
   primaryRole: {
@@ -42,12 +42,6 @@ const FIELD_CONFIG = {
     responseKey: 'risk_appetite_name',
   },
 };
-
-function buildEndpoint(path) {
-  const normalizedBase = String(process.env.EXPO_PUBLIC_API_BASE_URL || BASE_URL || '').replace(/\/$/, '');
-  const normalizedPath = String(path || '').startsWith('/') ? path : `/${path}`;
-  return `${normalizedBase}${normalizedPath}`;
-}
 
 function toOptionModel(item, responseKey) {
   const label = String(item?.[responseKey] || item?.label || item?.name || '').trim();
@@ -199,7 +193,7 @@ export default function ProfileBioDetailsScreen({
         setLoadingByField((current) => ({ ...current, [fieldKey]: true }));
         setErrorByField((current) => ({ ...current, [fieldKey]: '' }));
 
-        const response = await fetch(buildEndpoint(config.endpoint), {
+        const response = await apiFetch(config.endpoint, {
           method: 'GET',
           headers: { 'Content-Type': 'application/json' },
         });

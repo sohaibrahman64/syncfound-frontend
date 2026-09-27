@@ -88,8 +88,8 @@ export function parsePaymentCallbackFromUrl(url) {
   const params = parseUrlQueryParams(rawUrl);
   const { pathname, host, protocol } = parseUrlParts(rawUrl);
 
-  const isSuccessPath = pathname.endsWith('/payment/success');
-  const isFailurePath = pathname.endsWith('/payment/failure');
+  const isSuccessPath = pathname.endsWith('/api/v1/billing/payu/success');
+  const isFailurePath = pathname.endsWith('/api/v1/billing/payu/failure');
   const isSuccessSubPath = pathname === '/success' || pathname.endsWith('/success');
   const isFailureSubPath = pathname === '/failure' || pathname.endsWith('/failure');
   const isPaymentHostPath = host === 'payment' && (isSuccessSubPath || isFailureSubPath);

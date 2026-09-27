@@ -1,4 +1,8 @@
-import { createBillingCheckoutSession, getPricingPlans } from '../utils/backendAuth';
+import {
+  createBillingCheckoutSession,
+  getPayUCheckoutStatus,
+  getPricingPlans,
+} from '../utils/backendAuth';
 
 describe('getPricingPlans', () => {
   beforeEach(() => {
@@ -176,5 +180,34 @@ describe('getPricingPlans', () => {
         action_url: 'https://test.payu.in/_payment',
       }),
     );
+  });
+
+  it('loads PayU checkout status by checkout session id', async () => {
+    global.fetch.mockResolvedValue({
+      ok: true,
+      json: jest.fn().mockResolvedValue({
+        checkout_session_id: 'sess_123',
+        status: 'success',
+        tier: 'premium',
+      }),
+    });
+
+    const result = await getPayUCheckoutStatus({
+      firebaseToken: 'token-123',
+      checkoutSessionId: 'sess_123',
+    });
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      expect.stringContaining('/billing/payu/status?checkout_session_id=sess_123'),
+      expect.objectContaining({
+        method: 'GET',
+        headers: expect.objectContaining({
+          Authorization: 'Bearer token-123',
+        }),
+      }),
+    );
+    expect(result.status).toBe('success');
+    expect(result.tier).toBe('premium');
+    expect(result.is_premium).toBe(true);
   });
 });

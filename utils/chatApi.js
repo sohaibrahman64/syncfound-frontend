@@ -1,4 +1,4 @@
-import { BASE_URL } from './Constants';
+import { apiFetch } from './apiClient';
 import {
   normalizeChatConversation,
   normalizeChatDetails,
@@ -7,15 +7,6 @@ import {
 } from './chatTypes';
 
 const CHAT_BASE_PATH = '/users/me/chats';
-
-function normalizeApiBaseUrl(value) {
-  return String(value || '')
-    .trim()
-    .replace(/^['\"]|['\"]$/g, '')
-    .replace(/\/$/, '');
-}
-
-const API_BASE_URL = normalizeApiBaseUrl(process.env.EXPO_PUBLIC_API_BASE_URL || BASE_URL);
 
 function clampLimit(limit, fallback, max) {
   const num = Number(limit);
@@ -110,7 +101,7 @@ async function request({
   }
 
   try {
-    const response = await fetch(`${API_BASE_URL}${path}${querySuffix}`, {
+    const response = await apiFetch(`${path}${querySuffix}`, {
       method,
       headers: createAuthHeaders(firebaseToken),
       body: body ? JSON.stringify(body) : undefined,

@@ -9,7 +9,7 @@ import {
   View,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { getEntitlements } from '../utils/backendAuth';
+import { getPayUCheckoutStatus } from '../utils/backendAuth';
 import { getCurrentFirebaseIdToken } from '../utils/firebaseAuth';
 import { useResponsiveMetrics } from '../utils/responsive';
 import { withPlatformFontStyles } from '../utils/typography';
@@ -74,7 +74,10 @@ export default function PaymentFailureScreen({
     const runSingleCheck = async () => {
       try {
         const token = await getCurrentFirebaseIdToken(false).catch(() => firebaseToken);
-        const payload = await getEntitlements(token);
+        const payload = await getPayUCheckoutStatus({
+          firebaseToken: token,
+          checkoutSessionId,
+        });
 
         if (!isMounted) {
           return;
@@ -113,7 +116,7 @@ export default function PaymentFailureScreen({
     return () => {
       isMounted = false;
     };
-  }, [errorCode, errorMessage, firebaseToken, onAuthExpired, status]);
+  }, [checkoutSessionId, errorCode, errorMessage, firebaseToken, onAuthExpired, status]);
 
   const statusChipStyle = phase === 'premium' ? styles.statusChipPremium : styles.statusChipFailed;
 

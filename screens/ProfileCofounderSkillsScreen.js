@@ -10,24 +10,11 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { BASE_URL } from '../utils/Constants';
+import { apiFetch } from '../utils/apiClient';
 import { useResponsiveMetrics } from '../utils/responsive';
 import { withPlatformFontStyles } from '../utils/typography';
 
-const COFOUNDER_SKILLS_ENDPOINT = '/api/v1/cofounder-skills';
-
-function buildCofounderSkillsEndpoint(base) {
-  const normalized = String(base || '').replace(/\/$/, '');
-  if (!normalized) {
-    return `http://127.0.0.1:8000${COFOUNDER_SKILLS_ENDPOINT}`;
-  }
-
-  if (normalized.endsWith('/api/v1')) {
-    return `${normalized}/cofounder-skills`;
-  }
-
-  return `${normalized}${COFOUNDER_SKILLS_ENDPOINT}`;
-}
+const COFOUNDER_SKILLS_ENDPOINT = '/cofounder-skills';
 
 function toSkillModel(item) {
   const skillName = String(item?.skill_name || item?.skillName || item?.label || '').trim();
@@ -104,8 +91,7 @@ export default function ProfileCofounderSkillsScreen({
         setLoading(true);
         setErrorMessage('');
 
-        const endpoint = buildCofounderSkillsEndpoint(process.env.EXPO_PUBLIC_API_BASE_URL || BASE_URL);
-        const response = await fetch(endpoint, {
+        const response = await apiFetch(COFOUNDER_SKILLS_ENDPOINT, {
           method: 'GET',
           headers: {
             'Content-Type': 'application/json',

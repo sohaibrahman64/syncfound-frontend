@@ -15,13 +15,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useResponsiveMetrics } from '../utils/responsive';
 import { withPlatformFontStyles } from '../utils/typography';
-import { BASE_URL } from '../utils/Constants';
-
-function buildEndpoint(path) {
-  const normalizedBase = String(process.env.EXPO_PUBLIC_API_BASE_URL || BASE_URL || '').replace(/\/$/, '');
-  const normalizedPath = String(path || '').startsWith('/') ? path : `/${path}`;
-  return `${normalizedBase}${normalizedPath}`;
-}
+import { apiFetch } from '../utils/apiClient';
 
 function toEmploymentTypeModel(item) {
   const label = String(
@@ -206,7 +200,7 @@ export default function ProfileExperienceScreen({
         setLoadingEmploymentTypes(true);
         setEmploymentTypeError('');
 
-        const response = await fetch(buildEndpoint('/employment-types'), {
+        const response = await apiFetch('/employment-types', {
           method: 'GET',
           headers: { 'Content-Type': 'application/json' },
         });
@@ -261,7 +255,7 @@ export default function ProfileExperienceScreen({
         setLoadingLocationTypes(true);
         setLocationTypeError('');
 
-        const response = await fetch(buildEndpoint('/location-types'), {
+        const response = await apiFetch('/location-types', {
           method: 'GET',
           headers: { 'Content-Type': 'application/json' },
         });

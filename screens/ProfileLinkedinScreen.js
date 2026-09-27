@@ -11,10 +11,10 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useResponsiveMetrics } from '../utils/responsive';
 import { ingestLinkedinProfile } from '../utils/backendAuth';
+import { apiFetch } from '../utils/apiClient';
 import { withPlatformFontStyles } from '../utils/typography';
 
 const LINKEDIN_PREFIX = 'linkedin.com/in/';
-const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL || 'http://127.0.0.1:8000/api/v1';
 const LINKEDIN_PROFILE_PATH = '/linkedin-profile';
 
 function buildLinkedinProfilePreview(payload) {
@@ -121,19 +121,19 @@ export default function ProfileLinkedinScreen({
       return;
     }
 
-    const requestBase = API_BASE_URL.replace(/\/$/, '');
-    const requestUrl = `${requestBase}${LINKEDIN_PROFILE_PATH}?username=${encodeURIComponent(trimmedUsername)}`;
-
     setIsPreviewLoading(true);
     setPreviewError('');
 
     try {
-      const response = await fetch(requestUrl, {
+      const response = await apiFetch(
+        `${LINKEDIN_PROFILE_PATH}?username=${encodeURIComponent(trimmedUsername)}`,
+        {
         method: 'GET',
         headers: {
           Accept: 'application/json',
         },
-      });
+        },
+      );
 
       const payload = await response.json();
 

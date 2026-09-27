@@ -10,11 +10,11 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { BASE_URL } from '../utils/Constants';
+import { apiFetch } from '../utils/apiClient';
 import { useResponsiveMetrics } from '../utils/responsive';
 import { withPlatformFontStyles } from '../utils/typography';
 
-const MATCHING_PURPOSE_ENDPOINT = '/api/v1/matching-purpose';
+const MATCHING_PURPOSE_ENDPOINT = '/matching-purpose';
 
 const PURPOSE_ICON_MAP = {
   '../assets/group.png': require('../assets/group.png'),
@@ -26,19 +26,6 @@ const PURPOSE_ICON_MAP = {
   '../assets/teamwork.png': require('../assets/teamwork.png'),
   '../assets/teamwork_green.png': require('../assets/teamwork_green.png'),
 };
-
-function buildMatchingPurposeEndpoint(base) {
-  const normalized = String(base || '').replace(/\/$/, '');
-  if (!normalized) {
-    return `http://127.0.0.1:8000${MATCHING_PURPOSE_ENDPOINT}`;
-  }
-
-  if (normalized.endsWith('/api/v1')) {
-    return `${normalized}/matching-purpose`;
-  }
-
-  return `${normalized}${MATCHING_PURPOSE_ENDPOINT}`;
-}
 
 function resolvePurposeIcon(iconPath) {
   return PURPOSE_ICON_MAP[String(iconPath || '').trim()] || null;
@@ -98,8 +85,7 @@ export default function ProfileMatchingPurposeScreen({
         setLoading(true);
         setErrorMessage('');
 
-        const endpoint = buildMatchingPurposeEndpoint(process.env.EXPO_PUBLIC_API_BASE_URL || BASE_URL);
-        const response = await fetch(endpoint, {
+        const response = await apiFetch(MATCHING_PURPOSE_ENDPOINT, {
           method: 'GET',
           headers: {
             'Content-Type': 'application/json',

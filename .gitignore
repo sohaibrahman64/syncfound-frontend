@@ -40,3 +40,6 @@ yarn-error.*
 /ios
 
 .env
+
+# Ignore Log files
+*.log

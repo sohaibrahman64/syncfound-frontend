@@ -9,7 +9,7 @@ import {
   View,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { getEntitlements } from '../utils/backendAuth';
+import { getPayUCheckoutStatus } from '../utils/backendAuth';
 import { getCurrentFirebaseIdToken } from '../utils/firebaseAuth';
 import { useResponsiveMetrics } from '../utils/responsive';
 import { withPlatformFontStyles } from '../utils/typography';
@@ -56,7 +56,10 @@ export default function PaymentSuccessScreen({
     for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
       try {
         const token = await getCurrentFirebaseIdToken(false).catch(() => firebaseToken);
-        const payload = await getEntitlements(token);
+        const payload = await getPayUCheckoutStatus({
+          firebaseToken: token,
+          checkoutSessionId,
+        });
 
         if (resolveTier(payload) === 'premium') {
           return { isPremium: true };
@@ -116,7 +119,7 @@ export default function PaymentSuccessScreen({
     return () => {
       isMounted = false;
     };
-  }, [firebaseToken, onAuthExpired, status]);
+  }, [checkoutSessionId, firebaseToken, onAuthExpired, status]);
 
   const statusChipStyle =
     phase === 'unlocked'

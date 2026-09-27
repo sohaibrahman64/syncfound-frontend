@@ -8,37 +8,11 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { BASE_URL } from "../utils/Constants";
+import { apiFetch } from "../utils/apiClient";
 import { useResponsiveMetrics } from "../utils/responsive";
 import { withPlatformFontStyles } from "../utils/typography";
 import CityPickerScreen from "./CityPickerScreen";
 import StatePickerScreen from "./StatePickerScreen";
-
-function buildStatesEndpoint(base) {
-  const normalized = String(base || "").replace(/\/$/, "");
-  if (!normalized) {
-    return "http://127.0.0.1:8000/api/v1/countries/states/by-country-code";
-  }
-
-  if (normalized.endsWith("/api/v1")) {
-    return `${normalized}/countries/states/by-country-code`;
-  }
-
-  return `${normalized}/api/v1/countries/states/by-country-code`;
-}
-
-function buildCitiesEndpoint(base) {
-  const normalized = String(base || "").replace(/\/$/, "");
-  if (!normalized) {
-    return "http://127.0.0.1:8000/api/v1/countries/cities/by-country-code";
-  }
-
-  if (normalized.endsWith("/api/v1")) {
-    return `${normalized}/countries/cities/by-country-code`;
-  }
-
-  return `${normalized}/api/v1/countries/cities/by-country-code`;
-}
 
 function toStateModel(item) {
   if (typeof item === "string") {
@@ -153,10 +127,7 @@ export default function ProfileLocationScreen({
     const resolveLocationSelections = async () => {
       try {
         if (shouldResolveState) {
-          const statesEndpoint = buildStatesEndpoint(
-            process.env.EXPO_PUBLIC_API_BASE_URL || BASE_URL,
-          );
-          const stateResponse = await fetch(statesEndpoint, {
+          const stateResponse = await apiFetch('/countries/states/by-country-code', {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
@@ -202,10 +173,7 @@ export default function ProfileLocationScreen({
         }
 
         if (shouldResolveCity) {
-          const citiesEndpoint = buildCitiesEndpoint(
-            process.env.EXPO_PUBLIC_API_BASE_URL || BASE_URL,
-          );
-          const cityResponse = await fetch(citiesEndpoint, {
+          const cityResponse = await apiFetch('/countries/cities/by-country-code', {
             method: "POST",
             headers: {
               "Content-Type": "application/json",

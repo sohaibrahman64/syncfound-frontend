@@ -11,22 +11,9 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { BASE_URL } from '../utils/Constants';
+import { apiFetch } from '../utils/apiClient';
 import { useResponsiveMetrics } from '../utils/responsive';
 import { withPlatformFontStyles } from '../utils/typography';
-
-function buildCitiesEndpoint(base) {
-  const normalized = String(base || '').replace(/\/$/, '');
-  if (!normalized) {
-    return 'http://127.0.0.1:8000/api/v1/countries/cities/by-country-code';
-  }
-
-  if (normalized.endsWith('/api/v1')) {
-    return `${normalized}/countries/cities/by-country-code`;
-  }
-
-  return `${normalized}/api/v1/countries/cities/by-country-code`;
-}
 
 function toCityModel(item) {
   if (typeof item === 'string') {
@@ -77,8 +64,7 @@ export default function CityPickerScreen({
         setLoading(true);
         setErrorMessage('');
 
-        const endpoint = buildCitiesEndpoint(process.env.EXPO_PUBLIC_API_BASE_URL || BASE_URL);
-        const response = await fetch(endpoint, {
+        const response = await apiFetch('/countries/cities/by-country-code', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',

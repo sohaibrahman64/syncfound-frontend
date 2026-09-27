@@ -10,24 +10,11 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { BASE_URL } from '../utils/Constants';
+import { apiFetch } from '../utils/apiClient';
 import { useResponsiveMetrics } from '../utils/responsive';
 import { withPlatformFontStyles } from '../utils/typography';
 
-const LOCATION_PREFERENCE_ENDPOINT = '/api/v1/location-preference';
-
-function buildLocationPreferenceEndpoint(base) {
-  const normalized = String(base || '').replace(/\/$/, '');
-  if (!normalized) {
-    return `http://127.0.0.1:8000${LOCATION_PREFERENCE_ENDPOINT}`;
-  }
-
-  if (normalized.endsWith('/api/v1')) {
-    return `${normalized}/location-preference`;
-  }
-
-  return `${normalized}${LOCATION_PREFERENCE_ENDPOINT}`;
-}
+const LOCATION_PREFERENCE_ENDPOINT = '/location-preference';
 
 function toQuestionModel(item) {
   const questionId = item?.question_id ?? item?.id;
@@ -163,8 +150,7 @@ export default function ProfileLocationPreferenceScreen({
         setLoading(true);
         setErrorMessage('');
 
-        const endpoint = buildLocationPreferenceEndpoint(process.env.EXPO_PUBLIC_API_BASE_URL || BASE_URL);
-        const response = await fetch(endpoint, {
+        const response = await apiFetch(LOCATION_PREFERENCE_ENDPOINT, {
           method: 'GET',
           headers: {
             'Content-Type': 'application/json',

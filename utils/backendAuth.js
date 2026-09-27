@@ -1,4 +1,5 @@
 import { BASE_URL } from "./Constants";
+import { apiFetch } from "./apiClient";
 
 function normalizeApiBaseUrl(value) {
   const text = String(value || "")
@@ -30,6 +31,8 @@ const PRICING_PLANS_PATH =
 const BILLING_CHECKOUT_SESSION_PATH =
   process.env.EXPO_PUBLIC_BILLING_CHECKOUT_SESSION_PATH ||
   "/users/me/billing/checkout-session";
+const BILLING_PAYU_STATUS_PATH =
+  process.env.EXPO_PUBLIC_BILLING_PAYU_STATUS_PATH || "/billing/payu/status";
 const RECEIVED_INVITES_PATH =
   process.env.EXPO_PUBLIC_RECEIVED_INVITES_PATH || "/users/me/invites";
 const SENT_INVITES_PATH =
@@ -86,15 +89,17 @@ function normalizeListPayload(payload) {
         : typeof payload?.hasMore === "boolean"
           ? payload.hasMore
           : Boolean(payload?.next_cursor ?? payload?.nextCursor),
-      planTier: String(payload?.plan_tier ?? payload?.planTier ?? "").trim(),
-      paywallRequired:
-        typeof payload?.paywall_required === "boolean"
-          ? payload.paywall_required
-          : typeof payload?.paywallRequired === "boolean"
-            ? payload.paywallRequired
-            : false,
-      remainingUnlocksToday:
-        payload?.remaining_unlocks_today ?? payload?.remainingUnlocksToday ?? null,
+    planTier: String(payload?.plan_tier ?? payload?.planTier ?? "").trim(),
+    paywallRequired:
+      typeof payload?.paywall_required === "boolean"
+        ? payload.paywall_required
+        : typeof payload?.paywallRequired === "boolean"
+          ? payload.paywallRequired
+          : false,
+    remainingUnlocksToday:
+      payload?.remaining_unlocks_today ??
+      payload?.remainingUnlocksToday ??
+      null,
   };
 }
 
@@ -119,10 +124,13 @@ async function fetchPaginatedList({
     queryParams.set("cursor", String(cursor));
   }
 
-  const response = await fetch(`${API_BASE_URL}${path}?${queryParams.toString()}`, {
-    method: "GET",
-    headers: createAuthHeaders(firebaseToken),
-  });
+  const response = await apiFetch(
+    `${path}?${queryParams.toString()}`,
+    {
+      method: "GET",
+      headers: createAuthHeaders(firebaseToken),
+    },
+  );
 
   const payload = await parseJsonResponse(response);
 
@@ -192,8 +200,12 @@ function extractUploadedImageUri(payload) {
  * Step 1 handoff only: send Firebase idToken to backend.
  * Backend verification and JWT issuance are handled server-side in later steps.
  */
-export async function sendFirebaseIdTokenToBackend(idToken, phone_number, country_id) {
-  const response = await fetch(`${API_BASE_URL}${FIREBASE_LOGIN_PATH}`, {
+export async function sendFirebaseIdTokenToBackend(
+  idToken,
+  phone_number,
+  country_id,
+) {
+  const response = await apiFetch(FIREBASE_LOGIN_PATH, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -225,7 +237,7 @@ export async function sendFirebaseIdTokenToBackend(idToken, phone_number, countr
 }
 
 export async function updateUserEmailInBackend(email, firebaseToken) {
-  const response = await fetch(`${API_BASE_URL}${USER_EMAIL_UPDATE_PATH}`, {
+  const response = await apiFetch(USER_EMAIL_UPDATE_PATH, {
     method: "PATCH",
     headers: {
       "Content-Type": "application/json",
@@ -258,7 +270,7 @@ export async function updateUserEmailInBackend(email, firebaseToken) {
 }
 
 export async function submitUserProfile(profileData, firebaseToken) {
-  const response = await fetch(`${API_BASE_URL}${USER_PROFILE_PATH}`, {
+  const response = await apiFetch(USER_PROFILE_PATH, {
     method: "PATCH",
     headers: {
       "Content-Type": "application/json",
@@ -311,7 +323,7 @@ export async function ingestLinkedinProfile(
     ...(linkedinPayload || {}),
   };
 
-  const response = await fetch(`${API_BASE_URL}${LINKEDIN_INGEST_PATH}`, {
+  const response = await apiFetch(LINKEDIN_INGEST_PATH, {
     method: "POST",
     headers,
     body: JSON.stringify(body),
@@ -347,7 +359,7 @@ export async function getIndustries(firebaseToken = "") {
     headers.Authorization = `Bearer ${firebaseToken}`;
   }
 
-  const response = await fetch(`${API_BASE_URL}${INDUSTRIES_PATH}`, {
+  const response = await apiFetch(INDUSTRIES_PATH, {
     method: "GET",
     headers,
   });
@@ -419,7 +431,9 @@ function normalizeMatchesPayload(payload) {
 function normalizePaywallPricingPayload(payload) {
   const normalizePlan = (plan) => {
     const code = String(plan?.plan_code || plan?.code || "").trim();
-    const currencyCode = String(plan?.currency_code || "").trim().toUpperCase();
+    const currencyCode = String(plan?.currency_code || "")
+      .trim()
+      .toUpperCase();
     const amountMinor = Number(plan?.amount_minor ?? plan?.price_minor);
 
     return {
@@ -427,14 +441,20 @@ function normalizePaywallPricingPayload(payload) {
       plan_code: code,
       code,
       currency_code: currencyCode,
-      amount_minor: Number.isFinite(amountMinor) ? Math.round(amountMinor) : null,
-      price_minor: Number.isFinite(amountMinor) ? Math.round(amountMinor) : null,
+      amount_minor: Number.isFinite(amountMinor)
+        ? Math.round(amountMinor)
+        : null,
+      price_minor: Number.isFinite(amountMinor)
+        ? Math.round(amountMinor)
+        : null,
     };
   };
 
   if (Array.isArray(payload)) {
     return {
-      plans: payload.map(normalizePlan).filter((plan) => Boolean(plan.plan_code)),
+      plans: payload
+        .map(normalizePlan)
+        .filter((plan) => Boolean(plan.plan_code)),
       currency_code: "",
       is_indian_user: false,
       india_country_id: null,
@@ -447,9 +467,13 @@ function normalizePaywallPricingPayload(payload) {
     user_country_id: payload?.user_country_id ?? null,
     india_country_id: payload?.india_country_id ?? null,
     is_indian_user: Boolean(payload?.is_indian_user),
-    currency_code: String(payload?.currency_code || "").trim().toUpperCase(),
+    currency_code: String(payload?.currency_code || "")
+      .trim()
+      .toUpperCase(),
     plans: Array.isArray(payload?.plans)
-      ? payload.plans.map(normalizePlan).filter((plan) => Boolean(plan.plan_code))
+      ? payload.plans
+          .map(normalizePlan)
+          .filter((plan) => Boolean(plan.plan_code))
       : [],
   };
 }
@@ -486,8 +510,8 @@ export async function getMyMatches({
       headers.Authorization = `Bearer ${token}`;
     }
 
-    const response = await fetch(
-      `${API_BASE_URL}${USER_MATCHES_PATH}?${queryParams.toString()}`,
+    const response = await apiFetch(
+      `${USER_MATCHES_PATH}?${queryParams.toString()}`,
       {
         method: "GET",
         headers,
@@ -564,8 +588,8 @@ export async function postMatchAction({
     body.request_id = trimmedRequestId;
   }
 
-  const response = await fetch(
-    `${API_BASE_URL}${USER_MATCHES_PATH}/${encodeURIComponent(candidateId)}/actions`,
+  const response = await apiFetch(
+    `${USER_MATCHES_PATH}/${encodeURIComponent(candidateId)}/actions`,
     {
       method: "POST",
       headers,
@@ -603,7 +627,7 @@ export async function getEntitlements(firebaseToken = "") {
     headers.Authorization = `Bearer ${firebaseToken}`;
   }
 
-  const response = await fetch(`${API_BASE_URL}${USER_ENTITLEMENTS_PATH}`, {
+  const response = await apiFetch(USER_ENTITLEMENTS_PATH, {
     method: "GET",
     headers,
   });
@@ -629,6 +653,58 @@ export async function getEntitlements(firebaseToken = "") {
   return payload;
 }
 
+export async function getPayUCheckoutStatus({
+  firebaseToken = "",
+  checkoutSessionId = "",
+} = {}) {
+  const normalizedSessionId = String(checkoutSessionId || "").trim();
+  if (!normalizedSessionId) {
+    throw new Error("checkout_session_id is required to load PayU status.");
+  }
+
+  const query = new URLSearchParams({
+    checkout_session_id: normalizedSessionId,
+  });
+  const response = await apiFetch(
+    `${BILLING_PAYU_STATUS_PATH}?${query.toString()}`,
+    {
+      method: "GET",
+      headers: createAuthHeaders(firebaseToken),
+    },
+  );
+
+  const payload = await parseJsonResponse(response);
+  if (!response.ok) {
+    throw createHttpError(
+      response,
+      payload,
+      `Failed to load PayU checkout status with status ${response.status}`,
+    );
+  }
+
+  const data = payload?.data && typeof payload.data === "object"
+    ? payload.data
+    : payload || {};
+
+  return {
+    ...data,
+    checkout_session_id: String(
+      data?.checkout_session_id || normalizedSessionId,
+    ).trim(),
+    status: String(data?.status || data?.payment_status || data?.checkout_status || "")
+      .trim()
+      .toLowerCase(),
+    tier: String(data?.tier || data?.plan_tier || data?.entitlement?.tier || "")
+      .trim()
+      .toLowerCase(),
+    is_premium: data?.is_premium === true ||
+      String(data?.tier || data?.plan_tier || data?.entitlement?.tier || "")
+        .trim()
+        .toLowerCase() === "premium",
+    raw: payload,
+  };
+}
+
 export async function getPricingPlans(firebaseToken = "") {
   const headers = {
     "Content-Type": "application/json",
@@ -638,7 +714,7 @@ export async function getPricingPlans(firebaseToken = "") {
     headers.Authorization = `Bearer ${firebaseToken}`;
   }
 
-  const response = await fetch(`${API_BASE_URL}${PRICING_PLANS_PATH}`, {
+  const response = await apiFetch(PRICING_PLANS_PATH, {
     method: "GET",
     headers,
   });
@@ -678,7 +754,7 @@ export async function createBillingCheckoutSession({
 } = {}) {
   const normalizedPlanCode = String(planCode || "").trim();
   if (!normalizedPlanCode) {
-    throw new Error("plan_code is required to initialize checkout.");
+    throw new Error("plan_code is required to initialize checkout."); 
   }
 
   const headers = {
@@ -689,11 +765,14 @@ export async function createBillingCheckoutSession({
     headers.Authorization = `Bearer ${firebaseToken}`;
   }
 
-  const response = await fetch(`${API_BASE_URL}${BILLING_CHECKOUT_SESSION_PATH}`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({ plan_code: normalizedPlanCode }),
-  });
+  const response = await apiFetch(
+    BILLING_CHECKOUT_SESSION_PATH,
+    {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ plan_code: normalizedPlanCode }),
+    },
+  );
 
   let payload = null;
   try {
@@ -713,30 +792,37 @@ export async function createBillingCheckoutSession({
     throw error;
   }
 
-  const providerPayload = payload?.provider_payload && typeof payload.provider_payload === "object"
-    ? payload.provider_payload
-    : null;
+  const providerPayload =
+    payload?.provider_payload && typeof payload.provider_payload === "object"
+      ? payload.provider_payload
+      : null;
 
   const normalizedProviderPayload = providerPayload
     ? {
-      ...providerPayload,
-      flow: String(providerPayload?.flow || "").trim().toLowerCase(),
-      method: String(providerPayload?.method || "").trim().toUpperCase(),
-      action_url: String(providerPayload?.action_url || providerPayload?.checkout_url || "").trim(),
-      post_data:
-        typeof providerPayload?.post_data === "string"
-          ? providerPayload.post_data
-          : typeof providerPayload?.postData === "string"
-            ? providerPayload.postData
-            : typeof providerPayload?.request_body === "string"
-              ? providerPayload.request_body
-              : typeof providerPayload?.body === "string"
-                ? providerPayload.body
-                : "",
-      txnid: String(providerPayload?.txnid || "").trim(),
-      surl: String(providerPayload?.surl || "").trim(),
-      furl: String(providerPayload?.furl || "").trim(),
-    }
+        ...providerPayload,
+        flow: String(providerPayload?.flow || "")
+          .trim()
+          .toLowerCase(),
+        method: String(providerPayload?.method || "")
+          .trim()
+          .toUpperCase(),
+        action_url: String(
+          providerPayload?.action_url || providerPayload?.checkout_url || "",
+        ).trim(),
+        post_data:
+          typeof providerPayload?.post_data === "string"
+            ? providerPayload.post_data
+            : typeof providerPayload?.postData === "string"
+              ? providerPayload.postData
+              : typeof providerPayload?.request_body === "string"
+                ? providerPayload.request_body
+                : typeof providerPayload?.body === "string"
+                  ? providerPayload.body
+                  : "",
+        txnid: String(providerPayload?.txnid || "").trim(),
+        surl: String(providerPayload?.surl || "").trim(),
+        furl: String(providerPayload?.furl || "").trim(),
+      }
     : null;
 
   return {
@@ -744,16 +830,24 @@ export async function createBillingCheckoutSession({
     user_country_id: payload?.user_country_id ?? null,
     india_country_id: payload?.india_country_id ?? null,
     is_indian_user: Boolean(payload?.is_indian_user),
-    provider: String(payload?.provider || "").trim().toLowerCase(),
+    provider: String(payload?.provider || "")
+      .trim()
+      .toLowerCase(),
     plan_id: payload?.plan_id ?? null,
     plan_code: String(payload?.plan_code || "").trim(),
     amount_minor: Number.isFinite(Number(payload?.amount_minor))
       ? Math.round(Number(payload?.amount_minor))
       : null,
-    currency_code: String(payload?.currency_code || "").trim().toUpperCase(),
+    currency_code: String(payload?.currency_code || "")
+      .trim()
+      .toUpperCase(),
     checkout_session_id: String(payload?.checkout_session_id || "").trim(),
-    checkout_status: String(payload?.checkout_status || "").trim().toLowerCase(),
-    checkout_url: String(payload?.checkout_url || payload?.payment_url || "").trim(),
+    checkout_status: String(payload?.checkout_status || "")
+      .trim()
+      .toLowerCase(),
+    checkout_url: String(
+      payload?.checkout_url || payload?.payment_url || "",
+    ).trim(),
     provider_payload: normalizedProviderPayload,
     message: String(payload?.message || "").trim(),
     raw: payload,
@@ -817,7 +911,7 @@ export async function getPassedProfiles({
 }
 
 export async function getInviteCounts({ firebaseToken = "" } = {}) {
-  const response = await fetch(`${API_BASE_URL}${INVITES_COUNTS_PATH}`, {
+  const response = await apiFetch(INVITES_COUNTS_PATH, {
     method: "GET",
     headers: createAuthHeaders(firebaseToken),
   });
@@ -860,8 +954,8 @@ export async function mutateInvite({
     body.request_id = normalizedRequestId;
   }
 
-  const response = await fetch(
-    `${API_BASE_URL}${RECEIVED_INVITES_PATH}/${encodeURIComponent(inviteId)}`,
+  const response = await apiFetch(
+    `${RECEIVED_INVITES_PATH}/${encodeURIComponent(inviteId)}`,
     {
       method: "PATCH",
       headers: createAuthHeaders(firebaseToken),
@@ -897,8 +991,8 @@ export async function withdrawSentInvite({
     body.request_id = normalizedRequestId;
   }
 
-  const response = await fetch(
-    `${API_BASE_URL}${RECEIVED_INVITES_PATH}/${encodeURIComponent(inviteId)}/withdraw`,
+  const response = await apiFetch(
+    `${RECEIVED_INVITES_PATH}/${encodeURIComponent(inviteId)}/withdraw`,
     {
       method: "POST",
       headers: createAuthHeaders(firebaseToken),
@@ -940,7 +1034,7 @@ export async function registerDevicePushToken({
     app_version: String(app_version || "").trim(),
   };
 
-  const response = await fetch(`${API_BASE_URL}${DEVICE_TOKENS_PATH}`, {
+  const response = await apiFetch(DEVICE_TOKENS_PATH, {
     method: "PUT",
     headers: createAuthHeaders(firebaseToken),
     body: JSON.stringify(body),
@@ -968,7 +1062,7 @@ export async function deactivateDevicePushToken({
     return null;
   }
 
-  const response = await fetch(`${API_BASE_URL}${DEVICE_TOKENS_PATH}`, {
+  const response = await apiFetch(DEVICE_TOKENS_PATH, {
     method: "DELETE",
     headers: createAuthHeaders(firebaseToken),
     body: JSON.stringify({ token: normalizedToken }),
@@ -1015,7 +1109,7 @@ export async function uploadProfileImage(imageUri, firebaseToken) {
     headers.Authorization = `Bearer ${firebaseToken}`;
   }
 
-  const response = await fetch(`${API_BASE_URL}${IMAGE_UPLOAD_PATH}`, {
+  const response = await apiFetch(IMAGE_UPLOAD_PATH, {
     method: "POST",
     headers,
     body: formData,
@@ -1078,7 +1172,7 @@ export async function removeProfileImage(imageUrl, firebaseToken) {
   }
 
   const query = `?url=${encodeURIComponent(normalizedUrl)}`;
-  const response = await fetch(`${API_BASE_URL}${IMAGE_REMOVE_PATH}${query}`, {
+  const response = await apiFetch(`${IMAGE_REMOVE_PATH}${query}`, {
     method: "DELETE",
     headers,
   });
@@ -1106,7 +1200,7 @@ export async function removeProfileImage(imageUrl, firebaseToken) {
  * Calls /auth/firebase-signin — only succeeds if the user already exists.
  */
 export async function signInWithFirebaseToken(idToken, phone_number) {
-  const response = await fetch(`${API_BASE_URL}${FIREBASE_SIGNIN_PATH}`, {
+  const response = await apiFetch(FIREBASE_SIGNIN_PATH, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

@@ -11,7 +11,7 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { BASE_URL } from "../utils/Constants";
+import { apiFetch } from "../utils/apiClient";
 import { getFlagAssetFromPath } from "../utils/flagAssetMap";
 import { useResponsiveMetrics } from "../utils/responsive";
 import { withPlatformFontStyles } from '../utils/typography';
@@ -45,8 +45,6 @@ export default function CountryPickerScreen({ onBack, onSelectCountry }) {
   const metrics = useResponsiveMetrics();
   const insets = useSafeAreaInsets();
   const styles = React.useMemo(() => createStyles(metrics, insets.top), [metrics, insets.top]);
-  const apiBaseUrl = process.env.EXPO_PUBLIC_API_BASE_URL || BASE_URL;
-
   useEffect(() => {
     let isMounted = true;
 
@@ -55,7 +53,7 @@ export default function CountryPickerScreen({ onBack, onSelectCountry }) {
         setLoading(true);
         setErrorMessage("");
 
-        const response = await fetch(`${apiBaseUrl.replace(/\/$/, "")}/countries-new`);
+        const response = await apiFetch("/countries-new");
         if (!response.ok) {
           throw new Error(`Failed to load countries: ${response.status}`);
         }
@@ -82,7 +80,7 @@ export default function CountryPickerScreen({ onBack, onSelectCountry }) {
     return () => {
       isMounted = false;
     };
-  }, [apiBaseUrl]);
+  }, []);
 
   const filteredCountries = useMemo(() => {
     const normalized = searchText.trim().toLowerCase();

@@ -10,11 +10,11 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { BASE_URL } from '../utils/Constants';
+import { apiFetch } from '../utils/apiClient';
 import { useResponsiveMetrics } from '../utils/responsive';
 import { withPlatformFontStyles } from '../utils/typography';
 
-const USER_ROLES_ENDPOINT = '/api/v1/user-roles';
+const USER_ROLES_ENDPOINT = '/user-roles';
 
 const ROLE_ICON_MAP = {
   '../assets/cofounder.png': require('../assets/cofounder.png'),
@@ -36,19 +36,6 @@ const ROLE_ICON_MAP = {
   '../assets/internship.png': require('../assets/internship.png'),
   '../assets/internship_green.png': require('../assets/internship_green.png'),
 };
-
-function buildUserRolesEndpoint(base) {
-  const normalized = String(base || '').replace(/\/$/, '');
-  if (!normalized) {
-    return `http://127.0.0.1:8000${USER_ROLES_ENDPOINT}`;
-  }
-
-  if (normalized.endsWith('/api/v1')) {
-    return `${normalized}/user-roles`;
-  }
-
-  return `${normalized}${USER_ROLES_ENDPOINT}`;
-}
 
 function resolveRoleIcon(iconPath) {
   return ROLE_ICON_MAP[String(iconPath || '').trim()] || null;
@@ -115,8 +102,7 @@ export default function ProfileUserRoleScreen({ onBack, onContinue, initialUserR
         setLoading(true);
         setErrorMessage('');
 
-        const endpoint = buildUserRolesEndpoint(process.env.EXPO_PUBLIC_API_BASE_URL || BASE_URL);
-        const response = await fetch(endpoint, {
+        const response = await apiFetch(USER_ROLES_ENDPOINT, {
           method: 'GET',
           headers: {
             'Content-Type': 'application/json',
