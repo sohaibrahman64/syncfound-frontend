@@ -39,6 +39,7 @@ import { getCurrentFirebaseIdToken } from "../utils/firebaseAuth";
 import { listChats } from "../utils/chatApi";
 import { subscribeToChatPushEvents } from "../utils/chatPushEvents";
 import { FLAG_ASSET_MAP } from "../utils/flagAssetMap";
+import { BASE_URL } from "../utils/Constants";
 import { useResponsiveMetrics } from "../utils/responsive";
 import {
   generateRequestId,
@@ -317,13 +318,30 @@ function normalizeSkills(value) {
   return value.map((item) => String(item || "").trim()).filter(Boolean);
 }
 
+export function resolveProfilePhotoUrl(value) {
+  const photoUrl = String(value || "").trim();
+  if (!photoUrl || /^([a-z][a-z\d+.-]*:|\/\/)/i.test(photoUrl)) {
+    return photoUrl;
+  }
+
+  let baseOrigin = "";
+  try {
+    baseOrigin = new URL(BASE_URL).origin;
+  } catch {
+    return photoUrl;
+  }
+
+  const photoPath = photoUrl.replace(/^\/+/, "");
+  return baseOrigin && photoPath ? `${baseOrigin}/${photoPath}` : photoUrl;
+}
+
 function toMatchCardModel(item) {
   return {
     candidateId: item?.candidate_id ?? item?.id ?? null,
     displayName: String(item?.display_name || item?.name || "Founder").trim(),
-    profilePhotoUrl: String(
+    profilePhotoUrl: resolveProfilePhotoUrl(
       item?.profile_photo_url || item?.image_url || "",
-    ).trim(),
+    ),
     countryCode: String(item?.country_code || "").trim(),
     locationText:
       String(item?.location_text || "").trim() ||

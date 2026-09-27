@@ -196,6 +196,19 @@ function extractUploadedImageUri(payload) {
   return firstValid || "";
 }
 
+function normalizeProfileImageUri(value) {
+  const text = typeof value === "string" ? value.trim() : "";
+  if (!/^https?:\/\//i.test(text)) {
+    return value;
+  }
+
+  try {
+    return new URL(text).pathname || text;
+  } catch {
+    return text;
+  }
+}
+
 /**
  * Step 1 handoff only: send Firebase idToken to backend.
  * Backend verification and JWT issuance are handled server-side in later steps.
@@ -270,13 +283,20 @@ export async function updateUserEmailInBackend(email, firebaseToken) {
 }
 
 export async function submitUserProfile(profileData, firebaseToken) {
+  const requestProfileData = { ...profileData };
+  if (typeof requestProfileData.profileImageUri === "string") {
+    requestProfileData.profileImageUri = normalizeProfileImageUri(
+      requestProfileData.profileImageUri,
+    );
+  }
+
   const response = await apiFetch(USER_PROFILE_PATH, {
     method: "PATCH",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${firebaseToken}`,
     },
-    body: JSON.stringify(profileData),
+    body: JSON.stringify(requestProfileData),
   });
 
   let payload = null;

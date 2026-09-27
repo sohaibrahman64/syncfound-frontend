@@ -15,6 +15,7 @@
 
 import React from 'react';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
+import { BASE_URL } from '../utils/Constants';
 
 // ---------------------------------------------------------------------------
 // Module mocks — must be hoisted before any imports of the mocked modules
@@ -100,7 +101,7 @@ jest.mock('react-native/Libraries/Animated/NativeAnimatedHelper', () => ({}), { 
 // After mocks are in place, import the component under test
 // ---------------------------------------------------------------------------
 import HomeScreen from '../screens/HomeScreen';
-import { getPricingPlans, postMatchAction } from '../utils/backendAuth';
+import { getMyMatches, getPricingPlans, postMatchAction } from '../utils/backendAuth';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -159,6 +160,17 @@ describe('HomeScreen — swipe monetization', () => {
         },
       ],
     });
+  });
+
+  it('prefixes relative match photo paths with the BASE_URL origin only', () => {
+    const { resolveProfilePhotoUrl } = require('../screens/HomeScreen');
+
+    expect(resolveProfilePhotoUrl('/uploads/images/photo.jpg')).toBe(
+      `${new URL(BASE_URL).origin}/uploads/images/photo.jpg`,
+    );
+    expect(resolveProfilePhotoUrl('https://cdn.example.com/photo.jpg')).toBe(
+      'https://cdn.example.com/photo.jpg',
+    );
   });
 
   // -------------------------------------------------------------------------
