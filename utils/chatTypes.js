@@ -1,3 +1,5 @@
+import { BASE_URL_NO_API } from './Constants';
+
 /**
  * @typedef {Object} ChatParticipant
  * @property {string} userId
@@ -56,11 +58,22 @@ function asArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
+function resolveChatPhotoUrl(value) {
+  const photoUrl = asText(value);
+  if (!photoUrl || /^([a-z][a-z\d+.-]*:|\/\/)/i.test(photoUrl)) {
+    return photoUrl;
+  }
+
+  const baseUrl = String(BASE_URL_NO_API || '').trim().replace(/\/+$/, '');
+  const photoPath = photoUrl.replace(/^\/+/, '');
+  return baseUrl && photoPath ? `${baseUrl}/${photoPath}` : photoUrl;
+}
+
 export function normalizeChatParticipant(raw = {}) {
   return {
     userId: asText(raw.user_id || raw.userId || raw.id),
     displayName: asText(raw.display_name || raw.full_name || raw.name, 'Unknown user'),
-    photoUrl: asText(
+    photoUrl: resolveChatPhotoUrl(
       raw.profile_picture_url || raw.profile_photo_url || raw.photo_url || raw.avatar_url,
     ),
     headline: asText(raw.title || raw.headline || raw.linkedin_headline),

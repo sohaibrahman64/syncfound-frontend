@@ -1,47 +1,69 @@
 import React from 'react';
 import { Image, Pressable, Text, View } from 'react-native';
 
-function topTextByTab(tabKey, item) {
+function renderTopTextByTab(tabKey, item, styles) {
+  const boldNameStyle = [styles.cardTopText, { fontWeight: '700' }];
+
   if (tabKey === 'invitations') {
-    return `${item.previewName}: ${item.messagePreview}`;
+    return (
+      <>
+        <Text style={boldNameStyle}>{item.previewName}</Text>
+        <Text style={styles.cardTopText}>: {item.messagePreview}</Text>
+      </>
+    );
   }
 
   if (tabKey === 'sent') {
-    return `You: ${item.messagePreview}`;
+    return (
+      <>
+        <Text style={boldNameStyle}>{item.previewName || 'You'}</Text>
+        <Text style={styles.cardTopText}>: {item.messagePreview}</Text>
+      </>
+    );
   }
 
   if (tabKey === 'saved') {
-    return `You saved ${item.displayName} profile`;
+    return (
+      <>
+        <Text style={styles.cardTopText}>You saved </Text>
+        <Text style={boldNameStyle}>{item.previewName}</Text>
+        <Text style={styles.cardTopText}> profile</Text>
+      </>
+    );
   }
 
-  return `You passed on ${item.displayName} profile`;
+  return (
+    <>
+      <Text style={styles.cardTopText}>You passed on </Text>
+      <Text style={boldNameStyle}>{item.previewName}</Text>
+      <Text style={styles.cardTopText}> profile</Text>
+    </>
+  );
 }
 
 export default function InviteListCard({ item, tabKey, styles, onPress }) {
-  const topText = topTextByTab(tabKey, item);
-
   return (
     <Pressable style={styles.cardWrap} onPress={() => onPress?.(item)}>
       <View style={styles.cardTopBubble}>
         <Text style={[styles.cardTopText, (tabKey === 'saved' || tabKey === 'passed') && styles.cardTopTextMuted]} numberOfLines={2}>
-          {topText}
+          {renderTopTextByTab(tabKey, item, styles)}
         </Text>
       </View>
 
       <View style={styles.cardDivider} />
 
       <View style={styles.profileRow}>
-        <View style={styles.avatarWrap}>
+        <View style={styles.inviteCardAvatarWrap}>
           {item.photoUrl ? (
-            <Image source={{ uri: item.photoUrl }} style={styles.avatarImage} />
+            <Image source={{ uri: item.photoUrl }} style={styles.inviteCardAvatarImage} />
           ) : (
-            <Image source={require('../../assets/cofounders.jpg')} style={styles.avatarImage} />
+            <Image source={require('../../assets/cofounders.jpg')} style={styles.inviteCardAvatarImage} />
           )}
         </View>
 
-        <View style={styles.profileTextWrap}>
-          <Text style={styles.profileName} numberOfLines={1}>{item.displayName}</Text>
-          <Text style={styles.profileLocation} numberOfLines={1}>{item.locationText}</Text>
+        <View style={styles.inviteCardProfileTextWrap}>
+          <Text style={styles.inviteCardProfileName} numberOfLines={1}>{item.displayName}</Text>
+          <Text style={styles.inviteCardProfileLocation} numberOfLines={1}>{item.locationText}</Text>
         </View>
       </View>
 

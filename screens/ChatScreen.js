@@ -517,7 +517,6 @@ export default function ChatScreen({
 
 function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }, insets = {}) {
   const isNarrowScreen = width < 370;
-  const isShortScreen = height < 760;
   const topInset = insets?.top || 0;
   const bottomInset = insets?.bottom || 0;
 
@@ -525,7 +524,7 @@ function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }, 
     container: {
       flex: 1,
       backgroundColor: '#dfddd5',
-      paddingTop: topInset + vh(isShortScreen ? 1.2 : 2.2),
+      paddingTop: topInset + moderateScale(20),
     },
     threadHeaderRow: {
       flexDirection: 'row',
@@ -546,8 +545,8 @@ function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }, 
       tintColor: '#7f8696',
     },
     pageTitle: {
-      fontSize: responsiveFont(38, 30, 44),
-      lineHeight: responsiveFont(42, 34, 48),
+      fontSize: responsiveFont(28, 22, 32),
+      lineHeight: responsiveFont(32, 26, 36),
       fontWeight: '700',
       color: '#050505',
       marginHorizontal: vw(5.4),
@@ -573,8 +572,8 @@ function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }, 
       borderBottomWidth: 0,
     },
     tabLabel: {
-      fontSize: responsiveFont(18, 15, 20),
-      lineHeight: responsiveFont(22, 18, 24),
+      fontSize: responsiveFont(14, 12, 15),
+      lineHeight: responsiveFont(18, 15, 20),
       fontWeight: '600',
       color: '#0b0b0b',
     },
@@ -613,8 +612,8 @@ function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }, 
       overflow: 'hidden',
     },
     chatAvatarWrap: {
-      width: moderateScale(isNarrowScreen ? 74 : 78),
-      height: moderateScale(isNarrowScreen ? 74 : 78),
+      width: moderateScale(isNarrowScreen ? 88 : 96),
+      height: moderateScale(isNarrowScreen ? 88 : 96),
       borderRadius: moderateScale(14),
       overflow: 'hidden',
       flexShrink: 0,
@@ -638,8 +637,8 @@ function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }, 
     },
     chatCardName: {
       color: '#111111',
-      fontSize: responsiveFont(16, 14, 18),
-      lineHeight: responsiveFont(22, 18, 24),
+      fontSize: responsiveFont(18, 16, 20),
+      lineHeight: responsiveFont(24, 20, 26),
       fontWeight: '500',
       flexShrink: 1,
       maxWidth: '100%',
@@ -648,8 +647,8 @@ function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }, 
     chatCardPreview: {
       marginTop: moderateScale(4),
       color: '#6f7b96',
-      fontSize: responsiveFont(15, 13, 17),
-      lineHeight: responsiveFont(21, 17, 23),
+      fontSize: responsiveFont(16, 14, 18),
+      lineHeight: responsiveFont(22, 18, 24),
       fontWeight: '400',
       flexShrink: 1,
       maxWidth: '100%',

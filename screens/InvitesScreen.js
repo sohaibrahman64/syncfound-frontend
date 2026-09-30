@@ -31,6 +31,7 @@ import {
   withdrawSentInvite,
 } from '../utils/backendAuth';
 import { getCurrentFirebaseIdToken } from '../utils/firebaseAuth';
+import { BASE_URL_NO_API } from '../utils/Constants';
 import { useResponsiveMetrics } from '../utils/responsive';
 import { logAnalyticsEvent } from '../utils/swipeMonetization';
 import { withPlatformFontStyles } from '../utils/typography';
@@ -83,6 +84,17 @@ function getActionErrorMessage(error, fallback) {
 function safeText(value, fallback = '') {
   const text = String(value || '').trim();
   return text || fallback;
+}
+
+export function resolveProfilePhotoUrl(value) {
+  const photoUrl = String(value || '').trim();
+  if (!photoUrl || /^([a-z][a-z\d+.-]*:|\/\/)/i.test(photoUrl)) {
+    return photoUrl;
+  }
+
+  const baseUrl = String(BASE_URL_NO_API || '').trim().replace(/\/+$/, '');
+  const photoPath = photoUrl.replace(/^\/+/, '');
+  return baseUrl && photoPath ? `${baseUrl}/${photoPath}` : photoUrl;
 }
 
 function normalizeTags(value) {
@@ -313,7 +325,7 @@ function normalizeInvitations(items = []) {
       displayName: personName,
       previewName: personName,
       messagePreview: safeText(invite?.message, 'No message.'),
-      photoUrl: safeText(profile?.profile_photo_url),
+      photoUrl: resolveProfilePhotoUrl(profile?.profile_photo_url),
       locationText: safeText(profile?.location_text, 'Location unavailable'),
       intentBadge: safeText(profile?.intent_badge, 'Looking for a cofounder to join existing idea'),
       timeCommitment: safeText(profile?.time_commitment, 'Full Time Commitment'),
@@ -342,7 +354,7 @@ function normalizeSent(items = []) {
       displayName: personName,
       previewName: 'You',
       messagePreview: safeText(invite?.message, 'No message.'),
-      photoUrl: safeText(profile?.profile_photo_url),
+      photoUrl: resolveProfilePhotoUrl(profile?.profile_photo_url),
       locationText: safeText(profile?.location_text, 'Location unavailable'),
       intentBadge: safeText(profile?.intent_badge, 'Looking for a cofounder to join existing idea'),
       timeCommitment: safeText(profile?.time_commitment, 'Already full-time on a startup'),
@@ -369,7 +381,7 @@ function normalizeSaved(items = []) {
       displayName: personName,
       previewName: personName,
       messagePreview: '',
-      photoUrl: safeText(profile?.profile_photo_url),
+      photoUrl: resolveProfilePhotoUrl(profile?.profile_photo_url),
       locationText: safeText(profile?.location_text, 'Location unavailable'),
       intentBadge: safeText(profile?.intent_badge, 'Looking for a cofounder to join existing idea'),
       timeCommitment: safeText(profile?.time_commitment, 'Ready to go full-time in the next year'),
@@ -395,7 +407,7 @@ function normalizePassed(items = []) {
       displayName: personName,
       previewName: personName,
       messagePreview: '',
-      photoUrl: safeText(profile?.profile_photo_url),
+      photoUrl: resolveProfilePhotoUrl(profile?.profile_photo_url),
       locationText: safeText(profile?.location_text, 'Location unavailable'),
       intentBadge: safeText(profile?.intent_badge, 'Looking for a cofounder to join existing idea'),
       timeCommitment: safeText(profile?.time_commitment, 'Ready to go full-time with the right co-founder'),
@@ -1161,23 +1173,23 @@ export default function InvitesScreen({ firebaseToken = '', onAuthExpired, onNav
           <View style={styles.detailHeroWrap}>
             <View style={styles.detailHeroTopRow}>
               <View style={styles.profileRow}>
-                <View style={styles.avatarWrap}>
+                <View style={styles.detailAvatarWrap}>
                   {selectedProfile.photoUrl ? (
-                    <Image source={{ uri: selectedProfile.photoUrl }} style={styles.avatarImage} />
+                    <Image source={{ uri: selectedProfile.photoUrl }} style={styles.detailAvatarImage} />
                   ) : (
-                    <Image source={require('../assets/cofounders.jpg')} style={styles.avatarImage} />
+                    <Image source={require('../assets/cofounders.jpg')} style={styles.detailAvatarImage} />
                   )}
                 </View>
 
-                <View style={styles.profileTextWrap}>
-                  <Text style={styles.profileName} numberOfLines={1}>{selectedProfile.displayName}</Text>
-                  <View style={styles.locationRow}>
-                    <Image source={require('../assets/user.png')} style={styles.locationIcon} />
-                    <Text style={styles.profileLocation} numberOfLines={1}>{selectedProfile.locationText}</Text>
+                <View style={styles.detailProfileTextWrap}>
+                  <Text style={styles.detailProfileName} numberOfLines={1}>{selectedProfile.displayName}</Text>
+                  <View style={styles.detailLocationRow}>
+                    <Image source={require('../assets/user.png')} style={styles.detailLocationIcon} />
+                    <Text style={styles.detailProfileLocation} numberOfLines={1}>{selectedProfile.locationText}</Text>
                   </View>
-                  <View style={styles.locationRow}>
-                    <Image source={require('../assets/teamwork.png')} style={styles.locationIcon} />
-                    <Text style={styles.profileLocation} numberOfLines={1}>{safeText(selectedProfile.userRole || selectedProfile.role, 'Open to remote work')}</Text>
+                  <View style={styles.detailLocationRow}>
+                    <Image source={require('../assets/teamwork.png')} style={styles.detailLocationIcon} />
+                    <Text style={styles.detailProfileLocation} numberOfLines={1}>{safeText(selectedProfile.userRole || selectedProfile.role, 'Open to remote work')}</Text>
                   </View>
                 </View>
               </View>
@@ -1516,14 +1528,14 @@ function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }, 
     container: {
       flex: 1,
       backgroundColor: '#dfddd5',
-      paddingTop: topInset + vh(isShortScreen ? 1.2 : 2.2),
+      paddingTop: topInset + 20 + vh(isShortScreen ? 1.2 : 2.2),
       paddingBottom: moderateScale(92) + bottomInset,
       paddingHorizontal: vw(5),
     },
     pageTitle: {
       color: '#111111',
-      fontSize: responsiveFont(38, 30, 44),
-      lineHeight: responsiveFont(42, 34, 48),
+      fontSize: responsiveFont(28, 22, 32),
+      lineHeight: responsiveFont(32, 26, 36),
       fontWeight: '700',
       marginLeft: vw(3.4),
       marginBottom: vh(3.4),
@@ -1544,8 +1556,8 @@ function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }, 
     },
     tabText: {
       color: '#111111',
-      fontSize: responsiveFont(18, 15, 20),
-      lineHeight: responsiveFont(22, 18, 24),
+      fontSize: responsiveFont(14, 12, 15),
+      lineHeight: responsiveFont(18, 15, 20),
       fontWeight: '600',
       includeFontPadding: false,
     },
@@ -1591,8 +1603,8 @@ function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }, 
     detailHeaderTitle: {
       flex: 1,
       color: '#111111',
-      fontSize: responsiveFont(28, 22, 32),
-      lineHeight: responsiveFont(34, 27, 38),
+      fontSize: responsiveFont(24, 20, 27),
+      lineHeight: responsiveFont(30, 24, 32),
       fontWeight: '700',
     },
     detailHeaderSpacer: {
@@ -1610,12 +1622,12 @@ function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }, 
       paddingHorizontal: moderateScale(14),
       paddingVertical: moderateScale(12),
       marginHorizontal: moderateScale(12),
-      marginBottom: moderateScale(14),
+      marginBottom: moderateScale(12),
     },
     detailMessageText: {
       color: '#111111',
-      fontSize: responsiveFont(15, 13, 16),
-      lineHeight: responsiveFont(21, 17, 23),
+      fontSize: responsiveFont(14, 12, 15),
+      lineHeight: responsiveFont(19, 16, 21),
       fontWeight: '500',
     },
     detailMessageHeaderRow: {
@@ -1624,32 +1636,77 @@ function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }, 
       marginBottom: moderateScale(10),
     },
     detailMessageHeaderIcon: {
-      width: moderateScale(20),
-      height: moderateScale(20),
+      width: moderateScale(18),
+      height: moderateScale(18),
       resizeMode: 'contain',
-      marginRight: moderateScale(10),
+      marginRight: moderateScale(8),
     },
     detailMessageHeading: {
       flex: 1,
       color: '#111111',
-      fontSize: responsiveFont(17, 14, 18),
-      lineHeight: responsiveFont(23, 19, 24),
+      fontSize: responsiveFont(16, 13, 17),
+      lineHeight: responsiveFont(22, 18, 23),
       fontWeight: '700',
     },
     detailMessageBodyText: {
       color: '#111111',
-      fontSize: responsiveFont(15, 13, 16),
-      lineHeight: responsiveFont(23, 19, 24),
+      fontSize: responsiveFont(14, 12, 15),
+      lineHeight: responsiveFont(20, 17, 21),
       fontWeight: '400',
     },
     detailHeroWrap: {
       marginHorizontal: moderateScale(12),
-      marginBottom: moderateScale(10),
+      marginBottom: moderateScale(12),
     },
     detailHeroTopRow: {
       flexDirection: 'row',
-      alignItems: 'flex-start',
+      alignItems: 'center',
       justifyContent: 'space-between',
+    },
+    detailAvatarWrap: {
+      width: moderateScale(isNarrowScreen ? 96 : 108),
+      height: moderateScale(isNarrowScreen ? 96 : 108),
+      borderRadius: moderateScale(14),
+      overflow: 'hidden',
+      backgroundColor: '#d1d1d1',
+      flexShrink: 0,
+    },
+    detailAvatarImage: {
+      width: '100%',
+      height: '100%',
+      resizeMode: 'cover',
+    },
+    detailProfileTextWrap: {
+      marginLeft: moderateScale(14),
+      flex: 1,
+      minWidth: 0,
+    },
+    detailProfileName: {
+      color: '#111111',
+      fontSize: responsiveFont(24, 20, 26),
+      lineHeight: responsiveFont(30, 24, 32),
+      fontWeight: '400',
+    },
+    detailLocationRow: {
+      marginTop: moderateScale(5),
+      flexDirection: 'row',
+      alignItems: 'center',
+      minWidth: 0,
+    },
+    detailLocationIcon: {
+      width: moderateScale(14),
+      height: moderateScale(14),
+      resizeMode: 'contain',
+      marginRight: moderateScale(7),
+      tintColor: '#626981',
+    },
+    detailProfileLocation: {
+      flex: 1,
+      color: '#626981',
+      fontStyle: 'italic',
+      fontSize: responsiveFont(15, 13, 16),
+      lineHeight: responsiveFont(20, 16, 21),
+      fontWeight: '400',
     },
     linkedinButton: {
       marginLeft: moderateScale(10),
@@ -1686,15 +1743,15 @@ function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }, 
     },
     heroIntentText: {
       color: '#ffffff',
-      fontSize: responsiveFont(17, 14, 18),
-      lineHeight: responsiveFont(22, 18, 24),
+      fontSize: responsiveFont(14, 12, 15),
+      lineHeight: responsiveFont(18, 15, 20),
       fontWeight: '500',
     },
     heroBioText: {
       marginTop: moderateScale(8),
       color: '#111111',
-      fontSize: responsiveFont(20, 16, 22),
-      lineHeight: responsiveFont(29, 23, 32),
+      fontSize: responsiveFont(15, 13, 16),
+      lineHeight: responsiveFont(22, 18, 24),
       fontWeight: '700',
     },
     lockedHeroBioMask: {
@@ -1806,28 +1863,28 @@ function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }, 
     },
     detailSectionTitle: {
       color: '#111111',
-      fontSize: responsiveFont(21, 17, 23),
-      lineHeight: responsiveFont(28, 22, 30),
+      fontSize: responsiveFont(18, 15, 19),
+      lineHeight: responsiveFont(24, 20, 26),
       fontWeight: '700',
       marginBottom: moderateScale(8),
     },
     detailSectionBody: {
       color: '#1a1a1a',
-      fontSize: responsiveFont(16, 14, 18),
-      lineHeight: responsiveFont(23, 19, 25),
+      fontSize: responsiveFont(15, 13, 16),
+      lineHeight: responsiveFont(22, 18, 24),
       fontWeight: '400',
     },
     detailIdeaTitle: {
       color: '#111111',
-      fontSize: responsiveFont(21, 17, 23),
-      lineHeight: responsiveFont(28, 22, 30),
+      fontSize: responsiveFont(18, 15, 19),
+      lineHeight: responsiveFont(24, 20, 26),
       fontWeight: '700',
       marginBottom: moderateScale(8),
     },
     detailIdeaBody: {
       color: '#1a1a1a',
-      fontSize: responsiveFont(17, 15, 19),
-      lineHeight: responsiveFont(24, 20, 26),
+      fontSize: responsiveFont(15, 13, 16),
+      lineHeight: responsiveFont(22, 18, 24),
       fontWeight: '400',
     },
     detailActionRow: {
@@ -2014,8 +2071,8 @@ function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }, 
     },
     cardTopText: {
       color: '#111111',
-      fontSize: responsiveFont(15, 13, 17),
-      lineHeight: responsiveFont(20, 16, 22),
+      fontSize: responsiveFont(14, 12, 15),
+      lineHeight: responsiveFont(18, 15, 20),
       fontWeight: '500',
     },
     cardTopTextMuted: {
@@ -2051,15 +2108,46 @@ function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }, 
     },
     profileName: {
       color: '#111111',
-      fontSize: responsiveFont(22, 17, 24),
-      lineHeight: responsiveFont(28, 22, 30),
+      fontSize: responsiveFont(18, 15, 20),
+      lineHeight: responsiveFont(22, 19, 24),
       fontWeight: '700',
     },
     profileLocation: {
       color: '#626981',
       fontStyle: 'italic',
+      fontSize: responsiveFont(13, 11, 14),
+      lineHeight: responsiveFont(17, 14, 18),
+      fontWeight: '400',
+    },
+    inviteCardAvatarWrap: {
+      width: moderateScale(isNarrowScreen ? 64 : 72),
+      height: moderateScale(isNarrowScreen ? 64 : 72),
+      borderRadius: moderateScale(12),
+      overflow: 'hidden',
+      backgroundColor: '#d1d1d1',
+      flexShrink: 0,
+    },
+    inviteCardAvatarImage: {
+      width: '100%',
+      height: '100%',
+      resizeMode: 'cover',
+    },
+    inviteCardProfileTextWrap: {
+      marginLeft: moderateScale(12),
+      flex: 1,
+      minWidth: 0,
+    },
+    inviteCardProfileName: {
+      color: '#111111',
+      fontSize: responsiveFont(20, 17, 22),
+      lineHeight: responsiveFont(25, 21, 27),
+      fontWeight: '700',
+    },
+    inviteCardProfileLocation: {
+      color: '#626981',
+      fontStyle: 'italic',
       fontSize: responsiveFont(15, 13, 16),
-      lineHeight: responsiveFont(20, 17, 21),
+      lineHeight: responsiveFont(20, 16, 21),
       fontWeight: '400',
     },
     lockBadge: {
@@ -2091,8 +2179,8 @@ function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }, 
     detailText: {
       flex: 1,
       color: '#1d1d1d',
-      fontSize: responsiveFont(17, 14, 18),
-      lineHeight: responsiveFont(24, 20, 25),
+      fontSize: responsiveFont(14, 12, 15),
+      lineHeight: responsiveFont(18, 15, 20),
       fontWeight: '400',
     },
     experienceListItem: {
