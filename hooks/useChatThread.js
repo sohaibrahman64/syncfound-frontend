@@ -96,6 +96,7 @@ export default function useChatThread({
       const payload = await getChat({
         firebaseToken,
         conversationId,
+        currentUserId,
         signal: controller.signal,
       });
 

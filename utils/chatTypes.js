@@ -58,6 +58,20 @@ function asArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
+function asTextArray(value) {
+  const values = Array.isArray(value)
+    ? value
+    : typeof value === 'string'
+      ? value.split(',')
+      : [];
+
+  return values
+    .map((item) => (typeof item === 'object' && item !== null
+      ? asText(item.name || item.label || item.value || item.title)
+      : asText(item)))
+    .filter(Boolean);
+}
+
 function resolveChatPhotoUrl(value) {
   const photoUrl = asText(value);
   if (!photoUrl || /^([a-z][a-z\d+.-]*:|\/\/)/i.test(photoUrl)) {
@@ -70,17 +84,54 @@ function resolveChatPhotoUrl(value) {
 }
 
 export function normalizeChatParticipant(raw = {}) {
+  const profile = {
+    ...(raw.profile_details || raw.profile || {}),
+    ...raw,
+  };
+  const experiences = asArray(profile.linkedin_experiences || profile.linkedinExperiences || profile.experiences);
+  const education = asArray(
+    profile.education_details || profile.educationEntries || profile.education || profile.linkedin_education || profile.linkedin_educations,
+  );
+
   return {
-    userId: asText(raw.user_id || raw.userId || raw.id),
-    displayName: asText(raw.display_name || raw.full_name || raw.name, 'Unknown user'),
+    ...profile,
+    userId: asText(profile.user_id || profile.userId || profile.id),
+    displayName: asText(profile.display_name || profile.full_name || profile.displayName || profile.name, 'Unknown user'),
     photoUrl: resolveChatPhotoUrl(
-      raw.profile_picture_url || raw.profile_photo_url || raw.photo_url || raw.avatar_url,
+      profile.profile_picture_url || profile.profile_photo_url || profile.photo_url || profile.photoUrl || profile.avatar_url,
     ),
-    headline: asText(raw.title || raw.headline || raw.linkedin_headline),
-    locationText: asText(raw.location_text || raw.location),
-    bio: asText(raw.bio),
-    userRole: asText(raw.user_role || raw.role),
-    linkedinUrl: asText(raw.linkedin_url),
+    headline: asText(profile.title || profile.headline || profile.linkedin_headline),
+    locationText: asText(profile.location_text || profile.locationText || profile.location),
+    bio: asText(profile.bio),
+    userRole: asText(profile.user_role || profile.role),
+    linkedinUrl: asText(profile.linkedin_url || profile.linkedinUrl),
+    intentBadge: asText(profile.intent_badge || profile.intentBadge),
+    timeCommitment: asText(profile.time_commitment || profile.timeCommitment),
+    roleTags: asTextArray(profile.role_tags || profile.roleTags),
+    age: asText(profile.age),
+    dateOfBirth: asText(profile.date_of_birth || profile.dateOfBirth || profile.dob || profile.birth_date),
+    startupIdea: asText(profile.startup_idea || profile.startupIdea),
+    motivation: asText(profile.motivation),
+    superpower: asText(profile.superpower || profile.strength),
+    passionAbout: asText(profile.passion_about || profile.passionAbout),
+    experienceSummary: asText(profile.experience_summary || profile.experienceSummary),
+    industries: asTextArray(profile.industries),
+    startupExperiences: asTextArray(profile.startup_experience || profile.startup_experiences || profile.startupExperiences),
+    workPreferences: asTextArray(profile.work_preferences || profile.work_preference || profile.work_modes || profile.workPreferences),
+    lookingForFounder: asText(
+      profile.looking_for_in_founder || profile.looking_for_founder || profile.lookingForFounder,
+    ),
+    founderPreferences: asTextArray(
+      profile.founder_preferences || profile.cofounder_preferences || profile.founderPreferences,
+    ),
+    lookingForTalent: asText(
+      profile.looking_for_in_talent || profile.looking_for_talent || profile.lookingForTalent,
+    ),
+    talentSkills: asTextArray(
+      profile.talent_skills || profile.desired_skills || profile.cofounder_skills || profile.talentSkills,
+    ),
+    linkedinExperiences: experiences,
+    educationEntries: education,
   };
 }
 
@@ -120,17 +171,23 @@ export function normalizeChatConversation(raw = {}) {
   };
 }
 
-export function normalizeChatDetails(raw = {}) {
+export function normalizeChatDetails(raw = {}, currentUserId = '') {
   const participants = asArray(raw.participants).map(normalizeChatParticipant);
+  const otherParticipant = normalizeChatParticipant(
+    raw.other_user
+      || raw.other_participant
+      || raw.counterparty
+      || participants.find((participant) => participant.userId && participant.userId !== currentUserId)
+      || participants[0]
+      || {},
+  );
 
   return {
     conversationId: asText(raw.conversation_id || raw.public_id || raw.id),
     linkedInviteId: asText(raw.linked_invite_id),
     linkedMatchId: asText(raw.linked_match_id),
     participants,
-    otherParticipant: normalizeChatParticipant(
-      raw.other_user || raw.other_participant || raw.counterparty || participants[0] || {},
-    ),
+    otherParticipant,
   };
 }
 

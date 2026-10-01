@@ -60,6 +60,7 @@ jest.mock('../utils/backendAuth', () => ({
     ],
     next_cursor: null,
   }),
+  getMyProfile: jest.fn(),
   postMatchAction: jest.fn(),
 }));
 
@@ -101,7 +102,7 @@ jest.mock('react-native/Libraries/Animated/NativeAnimatedHelper', () => ({}), { 
 // After mocks are in place, import the component under test
 // ---------------------------------------------------------------------------
 import HomeScreen from '../screens/HomeScreen';
-import { getMyMatches, getPricingPlans, postMatchAction } from '../utils/backendAuth';
+import { getMyMatches, getMyProfile, getPricingPlans, postMatchAction } from '../utils/backendAuth';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -160,6 +161,28 @@ describe('HomeScreen — swipe monetization', () => {
         },
       ],
     });
+  });
+
+  it('opens the Profile tab and loads the authenticated current-user profile', async () => {
+    getMyProfile.mockResolvedValue({
+      firstName: 'Sohaib',
+      lastName: 'Rahman',
+      startupIdea: 'FlashQuoteAI helps freelancers create quotations.',
+      linkedinUrl: 'linkedin.com/in/sohaib-rahman',
+      linkedinProfilePreview: {
+        firstLocation: 'Mumbai, Maharashtra, India',
+      },
+      locationPreference: [{ question_id: 1, selected_answer_id: 1 }],
+      profileImageUri: '/uploads/images/profile.jpg',
+    });
+
+    const { getByText, findByText } = renderHomeScreen();
+    fireEvent.press(getByText('Profile'));
+
+    expect(await findByText('Sohaib Rahman')).toBeTruthy();
+    expect(getByText('Mumbai, Maharashtra, India')).toBeTruthy();
+    expect(getByText('Open to relocate or remote work')).toBeTruthy();
+    expect(getMyProfile).toHaveBeenCalledWith('test-token');
   });
 
   it('prefixes relative match photo paths with the BASE_URL origin only', () => {

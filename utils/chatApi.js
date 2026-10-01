@@ -152,7 +152,7 @@ export async function listChats({ firebaseToken, limit = 20, cursor = null, sign
   };
 }
 
-export async function getChat({ firebaseToken, conversationId, signal } = {}) {
+export async function getChat({ firebaseToken, conversationId, currentUserId = '', signal } = {}) {
   const normalizedConversationId = String(conversationId || '').trim();
   if (!normalizedConversationId) {
     throw new Error('conversationId is required');
@@ -166,7 +166,7 @@ export async function getChat({ firebaseToken, conversationId, signal } = {}) {
     fallbackError: 'Failed to load conversation details.',
   });
 
-  return normalizeChatDetails(payload);
+  return normalizeChatDetails(payload, currentUserId);
 }
 
 export async function listMessages({

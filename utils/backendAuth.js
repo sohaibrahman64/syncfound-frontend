@@ -320,6 +320,26 @@ export async function submitUserProfile(profileData, firebaseToken) {
   return payload;
 }
 
+export async function getMyProfile(firebaseToken = "") {
+  const response = await apiFetch(USER_PROFILE_PATH, {
+    method: "GET",
+    headers: createAuthHeaders(firebaseToken),
+  });
+
+  const payload = await parseJsonResponse(response);
+  if (!response.ok) {
+    throw createHttpError(
+      response,
+      payload,
+      `Failed to load profile with status ${response.status}`,
+    );
+  }
+
+  return payload?.data && typeof payload.data === "object"
+    ? payload.data
+    : payload || {};
+}
+
 export async function ingestLinkedinProfile(
   linkedinPayload,
   userId,

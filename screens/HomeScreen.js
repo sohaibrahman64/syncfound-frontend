@@ -51,6 +51,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { withPlatformFontStyles } from "../utils/typography";
 import InvitesScreen from "./InvitesScreen";
 import ChatScreen from "./ChatScreen";
+import ProfileScreen from "./ProfileScreen";
 
 const PAGE_LIMIT = 20;
 const MODE_MATCHMAKING = "matchmaking";
@@ -1780,6 +1781,16 @@ export default function HomeScreen({
         launchConversationId={chatLaunchContext.conversationId}
         launchInitialMessageId={chatLaunchContext.initialMessageId}
         currentUserId={String(backendUserId || "")}
+      />
+    );
+  }
+
+  if (activeBottomTab === TAB_PROFILE) {
+    return (
+      <ProfileScreen
+        firebaseToken={firebaseToken}
+        onAuthExpired={onAuthExpired}
+        onNavigate={handleNavigateBottomTab}
       />
     );
   }

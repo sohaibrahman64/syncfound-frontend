@@ -3,7 +3,7 @@ jest.mock("../utils/apiClient", () => ({
 }));
 
 import { apiFetch } from "../utils/apiClient";
-import { submitUserProfile } from "../utils/backendAuth";
+import { getMyProfile, submitUserProfile } from "../utils/backendAuth";
 
 describe("submitUserProfile", () => {
   beforeEach(() => {
@@ -31,5 +31,29 @@ describe("submitUserProfile", () => {
     expect(profileData.profileImageUri).toBe(
       "http://127.0.0.1:8000/uploads/images/2026/06/17/photo.jpg",
     );
+  });
+});
+
+describe("getMyProfile", () => {
+  beforeEach(() => {
+    apiFetch.mockReset();
+    apiFetch.mockResolvedValue({
+      ok: true,
+      json: jest.fn().mockResolvedValue({ firstName: "Sohaib" }),
+    });
+  });
+
+  it("requests the current-user profile with a bearer token", async () => {
+    await expect(getMyProfile("firebase-token")).resolves.toEqual({
+      firstName: "Sohaib",
+    });
+
+    expect(apiFetch).toHaveBeenCalledWith("/users/me/profile", {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: "Bearer firebase-token",
+      },
+    });
   });
 });
