@@ -35,6 +35,7 @@ function toCityModel(item) {
 export default function CityPickerScreen({
   onBack,
   onSelectCity,
+  initialCities,
   countryIso3,
   countryPhoneCode,
   selectedStateLabel = '',
@@ -52,6 +53,20 @@ export default function CityPickerScreen({
     let isMounted = true;
 
     const fetchCities = async () => {
+      // Use cities already provided by GET /users/me/profile.
+      if (Array.isArray(initialCities) && initialCities.length > 0) {
+        const mapped = initialCities
+          .map(toCityModel)
+          .filter((item) => Boolean(item?.label));
+
+        if (isMounted) {
+          setCities(mapped);
+          setErrorMessage('');
+          setLoading(false);
+        }
+        return;
+      }
+
       if (!countryIso3 || !countryPhoneCode) {
         if (isMounted) {
           setErrorMessage('Missing country details. Please select country again.');
@@ -109,7 +124,7 @@ export default function CityPickerScreen({
     return () => {
       isMounted = false;
     };
-  }, [countryIso3, countryPhoneCode]);
+  }, [initialCities, countryIso3, countryPhoneCode]);
 
   const filteredCities = useMemo(() => {
     const query = searchText.trim().toLowerCase();

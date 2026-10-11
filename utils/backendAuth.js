@@ -18,10 +18,17 @@ const FIREBASE_SIGNIN_PATH = "/auth/firebase-signin";
 const USER_EMAIL_UPDATE_PATH = "/users/me/email";
 const USER_PROFILE_PATH =
   process.env.EXPO_PUBLIC_USER_PROFILE_PATH || "/users/me/profile";
+const USER_PROFILE_INDUSTRIES_PATH = "/users/me/profile/industries";
+const PROMPTS_PATH = "/prompts";
 const LINKEDIN_INGEST_PATH =
   process.env.EXPO_PUBLIC_LINKEDIN_INGEST_PATH || "/linkedin-profile/ingest";
 const INDUSTRIES_PATH =
   process.env.EXPO_PUBLIC_INDUSTRIES_PATH || "/industries";
+const USER_SKILLS_PATH =
+  process.env.EXPO_PUBLIC_USER_SKILLS_PATH || "/user-skills";
+
+const USER_PROFILE_SELECTED_SKILLS_PATH =
+  process.env.EXPO_PUBLIC_USER_PROFILE_SKILLS_PATH || "/users/me/profile/skills";
 const USER_MATCHES_PATH =
   process.env.EXPO_PUBLIC_USER_MATCHES_PATH || "/users/me/matches";
 const USER_ENTITLEMENTS_PATH =
@@ -124,13 +131,10 @@ async function fetchPaginatedList({
     queryParams.set("cursor", String(cursor));
   }
 
-  const response = await apiFetch(
-    `${path}?${queryParams.toString()}`,
-    {
-      method: "GET",
-      headers: createAuthHeaders(firebaseToken),
-    },
-  );
+  const response = await apiFetch(`${path}?${queryParams.toString()}`, {
+    method: "GET",
+    headers: createAuthHeaders(firebaseToken),
+  });
 
   const payload = await parseJsonResponse(response);
 
@@ -340,6 +344,24 @@ export async function getMyProfile(firebaseToken = "") {
     : payload || {};
 }
 
+export async function getMyProfileLinkedinDetails(firebaseToken = "") {
+  const response = await apiFetch("/users/me/profile/linkedin-details", {
+    method: "GET",
+    headers: createAuthHeaders(firebaseToken),
+  });
+
+  const payload = await parseJsonResponse(response);
+  if (!response.ok) {
+    throw createHttpError(
+      response,
+      payload,
+      `Failed to load LinkedIn details with status ${response.status}`,
+    );
+  }
+
+  return payload || {};
+}
+
 export async function ingestLinkedinProfile(
   linkedinPayload,
   userId,
@@ -390,6 +412,32 @@ export async function ingestLinkedinProfile(
   return payload;
 }
 
+export async function getMyProfileIndustries(firebaseToken = "") {
+  const response = await apiFetch(USER_PROFILE_INDUSTRIES_PATH, {
+    method: "GET",
+    headers: createAuthHeaders(firebaseToken),
+  });
+
+  const payload = await parseJsonResponse(response);
+  if (!response.ok) {
+    throw createHttpError(
+      response,
+      payload,
+      `Failed to load profile industries with status ${response.status}`,
+    );
+  }
+
+  if (Array.isArray(payload)) {
+    return payload;
+  }
+
+  if (Array.isArray(payload?.data)) {
+    return payload.data;
+  }
+
+  throw new Error("Profile industries response must be a list.");
+}
+
 export async function getIndustries(firebaseToken = "") {
   const headers = {
     "Content-Type": "application/json",
@@ -431,6 +479,101 @@ export async function getIndustries(firebaseToken = "") {
   }
 
   return [];
+}
+
+export async function getUserSkills(firebaseToken = "") {
+  const headers = {
+    "Content-Type": "application/json",
+  };
+
+  if (firebaseToken) {
+    headers.Authorization = `Bearer ${firebaseToken}`;
+  }
+
+  const response = await apiFetch(USER_SKILLS_PATH, {
+    method: "GET",
+    headers,
+  });
+
+  let payload = null;
+  try {
+    payload = await response.json();
+  } catch {
+    payload = null;
+  }
+
+  if (!response.ok) {
+    const error = new Error(
+      payload?.detail ||
+        payload?.message ||
+        `Failed to load user skills with status ${response.status}`,
+    );
+    error.status = response.status;
+    error.payload = payload;
+    throw error;
+  }
+
+  if (Array.isArray(payload)) {
+    return payload;
+  }
+
+  if (Array.isArray(payload?.data)) {
+    return payload.data;
+  }
+
+  return [];
+}
+
+export async function getUserProfileSelectedSkills(firebaseToken = "") {
+  const response = await apiFetch(USER_PROFILE_SELECTED_SKILLS_PATH, {
+    method: "GET",
+    headers: createAuthHeaders(firebaseToken),
+  });
+
+  const payload = await parseJsonResponse(response);
+  if (!response.ok) {
+    throw createHttpError(
+      response,
+      payload,
+      `Failed to load my user skills with status ${response.status}`,
+    );
+  }
+
+  if (Array.isArray(payload)) {
+    return payload;
+  }
+
+  if (Array.isArray(payload?.data)) {
+    return payload.data;
+  }
+
+  throw new Error("My user skills response must be a list.");
+}
+
+export async function getPrompts(firebaseToken = "") {
+  const response = await apiFetch(PROMPTS_PATH, {
+    method: "GET",
+    headers: createAuthHeaders(firebaseToken),
+  });
+  const payload = await parseJsonResponse(response);
+
+  if (!response.ok) {
+    throw createHttpError(
+      response,
+      payload,
+      `Failed to load prompts with status ${response.status}`,
+    );
+  }
+
+  if (Array.isArray(payload)) {
+    return payload;
+  }
+
+  if (Array.isArray(payload?.data)) {
+    return payload.data;
+  }
+
+  throw new Error("Prompts response must be a list.");
 }
 
 function normalizeMatchesPayload(payload) {
@@ -722,22 +865,26 @@ export async function getPayUCheckoutStatus({
     );
   }
 
-  const data = payload?.data && typeof payload.data === "object"
-    ? payload.data
-    : payload || {};
+  const data =
+    payload?.data && typeof payload.data === "object"
+      ? payload.data
+      : payload || {};
 
   return {
     ...data,
     checkout_session_id: String(
       data?.checkout_session_id || normalizedSessionId,
     ).trim(),
-    status: String(data?.status || data?.payment_status || data?.checkout_status || "")
+    status: String(
+      data?.status || data?.payment_status || data?.checkout_status || "",
+    )
       .trim()
       .toLowerCase(),
     tier: String(data?.tier || data?.plan_tier || data?.entitlement?.tier || "")
       .trim()
       .toLowerCase(),
-    is_premium: data?.is_premium === true ||
+    is_premium:
+      data?.is_premium === true ||
       String(data?.tier || data?.plan_tier || data?.entitlement?.tier || "")
         .trim()
         .toLowerCase() === "premium",
@@ -794,7 +941,7 @@ export async function createBillingCheckoutSession({
 } = {}) {
   const normalizedPlanCode = String(planCode || "").trim();
   if (!normalizedPlanCode) {
-    throw new Error("plan_code is required to initialize checkout."); 
+    throw new Error("plan_code is required to initialize checkout.");
   }
 
   const headers = {
@@ -805,14 +952,11 @@ export async function createBillingCheckoutSession({
     headers.Authorization = `Bearer ${firebaseToken}`;
   }
 
-  const response = await apiFetch(
-    BILLING_CHECKOUT_SESSION_PATH,
-    {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ plan_code: normalizedPlanCode }),
-    },
-  );
+  const response = await apiFetch(BILLING_CHECKOUT_SESSION_PATH, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ plan_code: normalizedPlanCode }),
+  });
 
   let payload = null;
   try {

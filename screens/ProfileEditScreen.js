@@ -1,8 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import DateTimePicker from "@react-native-community/datetimepicker";
+import DateTimePicker, {
+  DateTimePickerAndroid,
+} from "@react-native-community/datetimepicker";
 import {
   ActivityIndicator,
   Image,
+  Modal,
   PanResponder,
   Platform,
   Pressable,
@@ -15,15 +18,28 @@ import {
 import { useResponsiveMetrics } from "../utils/responsive";
 import {
   getIndustries,
-  getMyProfileIndustries,
+  getMyProfileIndustries as getUserProfileSelectedIndustries,
   getMyProfileLinkedinDetails,
+  getUserSkills,
+  getUserProfileSelectedSkills,
   getPrompts,
 } from "../utils/backendAuth";
 import { apiFetch } from "../utils/apiClient";
 import { withPlatformFontStyles } from "../utils/typography";
+import CityPickerScreen from "./CityPickerScreen";
+import CompensationEditScreen from "./CompensationEditScreen";
+import CompanySizeProfileEditScreen, {
+  COMPANY_SIZE_FIELDS,
+  normalizeCompanySizeSelections,
+} from "./CompanySizeProfileEditScreen";
+import { getCompanySizeSelectionLabel } from "./CompanySizeInterestLevelPicker";
+import WorkAuthorizationEditScreen, {
+  getWorkAuthorizationLabel,
+} from "./WorkAuthorizationEditScreen";
 
 const PROMPT_SLOTS = ["prompt-1", "prompt-2", "prompt-3"];
 const MAX_INDUSTRY_SELECTION = 5;
+const MAX_SKILLS_SELECTION = 5;
 const PRIOR_STARTUP_EXPERIENCE_OPTIONS = [
   "Sold a startup",
   "Founded/cofounded a company",
@@ -33,17 +49,120 @@ const PRIOR_STARTUP_EXPERIENCE_OPTIONS = [
 
 const BACKGROUND_ROWS = [
   { title: "Matching Goal*", value: "Have some ideas but open to exploring" },
-  { title: "Commitment Level*", value: "Ready to go full-time with the right co-founder" },
+  {
+    title: "Commitment Level*",
+    value: "Ready to go full-time with the right co-founder",
+  },
   { title: "Number of Founders", value: "Not selected", muted: true },
-  { title: "Skills & Expertise*", value: "AI/ML, Design, Engineering" },
+  { title: "Skills & Expertise*", value: "", muted: true },
   { title: "Equity Split", value: "Not Selected", muted: true },
 ];
+
+const TALENT_BACKGROUND_ROWS = [
+  {
+    title: "Job Search Profile*",
+    value: "Actively job seeking. Full-time or part-time roles",
+  },
+  {
+    title: "Bio & Experience*",
+    value: "Full-Stack Engineer, 5 years exp",
+  },
+  {
+    title: "Compensation*",
+    value: "Interested in some equity. Ideally above(Min: USD 250,000)",
+  },
+  {
+    title: "Company Size",
+    value: "Open to size: Mid-size (51-200)",
+  },
+  {
+    title: "Work Authorization*",
+    value:
+      "I am authorized to work in the US but will require sponsorship in the future",
+  },
+];
+
+const JOB_SEARCH_STATUS_OPTIONS = [
+  "Actively job seeking",
+  "Passively job seeking",
+  "Not currently open for hire",
+];
+const JOB_SEARCH_WORK_TYPES = ["Full Time", "Part Time", "Internship"];
+const BIO_EXPERIENCE_PICKER_FIELDS = {
+  fundingStage: {
+    label: "Funding Stage",
+    endpoint: "/funding-stages",
+    responseKey: "funding_stage_name",
+  },
+  riskAppetite: {
+    label: "Risk Appetite",
+    endpoint: "/risk-appetites",
+    responseKey: "risk_appetite_name",
+  },
+  employmentType: {
+    label: "Employment Type",
+    endpoint: "/employment-types",
+    responseKey: "employment_type_name",
+  },
+  locationType: {
+    label: "Location Type",
+    endpoint: "/location-types",
+    responseKey: "location_type_name",
+  },
+  primaryRole: {
+    label: "Primary Role",
+    endpoint: "/primary-roles",
+    responseKey: "primary_role_name",
+  },
+  secondaryRole: {
+    label: "Secondary Role (Optional)",
+    endpoint: "/secondary-roles",
+    responseKey: "secondary_role_name",
+  },
+};
+
+function toBioExperienceOption(item, responseKey) {
+  const label = String(
+    item?.[responseKey] ||
+      item?.employment_type_name ||
+      item?.location_type_name ||
+      item?.primary_role_name ||
+      item?.secondary_role_name ||
+      item?.funding_stage_name ||
+      item?.risk_appetite_name ||
+      item?.label ||
+      item?.name ||
+      "",
+  ).trim();
+  const parsedId = Number(item?.id);
+
+  return {
+    value: Number.isFinite(parsedId) ? parsedId : label,
+    label,
+    description: String(item?.description || "").trim(),
+  };
+}
+
+function parseBioExperienceDate(value) {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function formatBioExperienceDate(value) {
+  const date = parseBioExperienceDate(value);
+  if (!date) return "";
+  return date.toLocaleDateString("en-US", { month: "short", year: "numeric" });
+}
+
+function getBioExperienceDateValue(value) {
+  return parseBioExperienceDate(value) || new Date();
+}
 
 const ABOUT_ROWS = [
   { title: "Industries & Interests", value: "Not Selected", muted: true },
   { title: "Prior Startup Experience", value: "Not Selected", muted: true },
 ];
-
 
 function DetailRow({ title, value, muted, styles, onPress }) {
   const Row = onPress ? Pressable : View;
@@ -56,7 +175,13 @@ function DetailRow({ title, value, muted, styles, onPress }) {
     >
       <View style={styles.detailCopy}>
         <Text style={styles.detailTitle}>{title}</Text>
-        <Text style={[styles.detailValue, muted && styles.mutedValue]}>{value}</Text>
+        <Text
+          style={[styles.detailValue, muted && styles.mutedValue]}
+          numberOfLines={1}
+          ellipsizeMode="tail"
+        >
+          {value}
+        </Text>
       </View>
       <Text style={styles.chevron}>›</Text>
     </Row>
@@ -121,7 +246,12 @@ function ProfileEditorHeader({ title, onBack, onDone, styles }) {
   );
 }
 
-function NameProfileEditScreen({ initialFirstName, initialLastName, onDone, metrics }) {
+function NameProfileEditScreen({
+  initialFirstName,
+  initialLastName,
+  onDone,
+  metrics,
+}) {
   const styles = createStyles(metrics);
   const [firstName, setFirstName] = useState(initialFirstName);
   const [lastName, setLastName] = useState(initialLastName);
@@ -176,10 +306,9 @@ function AgeProfileEditScreen({ initialDateOfBirth, onDone, metrics }) {
   });
   const [showPicker, setShowPicker] = useState(false);
   const storageDate = dateOfBirth
-    ? `${dateOfBirth.getFullYear()}-${String(dateOfBirth.getMonth() + 1).padStart(
-        2,
-        "0",
-      )}-${String(dateOfBirth.getDate()).padStart(2, "0")}`
+    ? `${dateOfBirth.getFullYear()}-${String(
+        dateOfBirth.getMonth() + 1,
+      ).padStart(2, "0")}-${String(dateOfBirth.getDate()).padStart(2, "0")}`
     : "";
   const dateLabel = dateOfBirth
     ? `${String(dateOfBirth.getDate()).padStart(2, "0")}/${String(
@@ -297,6 +426,905 @@ function AgeProfileEditScreen({ initialDateOfBirth, onDone, metrics }) {
   );
 }
 
+function JobSearchProfileEditScreen({ initialValue, onBack, metrics }) {
+  const styles = createStyles(metrics);
+  const [status, setStatus] = useState(initialValue?.status || "");
+  const [workTypes, setWorkTypes] = useState(initialValue?.workTypes || []);
+  const [foundersOnly, setFoundersOnly] = useState(initialValue?.foundersOnly || false);
+  const [loading, setLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState("");
+  const [retryKey, setRetryKey] = useState(0);
+  const JOB_SEARCH_PROFILE_ENDPOINT = "/job_search_profile";
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const fetchJobSearchProfile = async () => {
+      try {
+        setLoading(true);
+        setErrorMessage("");
+
+        const response = await apiFetch(JOB_SEARCH_PROFILE_ENDPOINT, {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
+          },
+        });
+
+        if (!response.ok) {
+          throw new Error(`Failed to load job search profile: ${response.status}`);
+        }
+
+        const payload = await response.json();
+
+        // Extract job search profile
+        const jobSearchProfiles = Array.isArray(payload.job_search_profiles)
+          ? payload.job_search_profiles
+          : [];
+
+        const jobSearchProfile = jobSearchProfiles[0] || {};
+
+        // Extract work types
+        const jobSearchProfileWorkTypes = Array.isArray(payload.job_search_profile_work_types)
+          ? payload.job_search_profile_work_types
+          : [];
+
+        const workTypeValues = jobSearchProfileWorkTypes.map(
+          item => item.job_search_profile_work_type
+        ).filter(Boolean);
+
+        if (isMounted) {
+          // Set status from job_search_profile field
+          setStatus(jobSearchProfile.job_search_profile || "");
+
+          // Set work types from job_search_profile_work_type fields
+          setWorkTypes(workTypeValues);
+
+          // For foundersOnly, we don't have this in the API response based on the example,
+          // so we'll keep the initial value or default to false
+          if (initialValue?.foundersOnly !== undefined) {
+            setFoundersOnly(initialValue.foundersOnly);
+          }
+        }
+      } catch {
+        if (isMounted) {
+          setErrorMessage("Could not load job search profile. Please try again.");
+        }
+      } finally {
+        if (isMounted) {
+          setLoading(false);
+        }
+      }
+    };
+
+    fetchJobSearchProfile();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [retryKey, initialValue]);
+
+  function toggleWorkType(workType) {
+    setWorkTypes((current) =>
+      current.includes(workType)
+        ? current.filter((selected) => selected !== workType)
+        : [...current, workType],
+    );
+  }
+
+  return (
+    <View style={styles.screen}>
+      {loading ? (
+        <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
+          <ActivityIndicator
+            accessibilityLabel="Loading job search profile"
+            size="large"
+            color="#2dbcc4"
+            style={{ marginBottom: 20 }}
+          />
+          <Text style={styles.profileFieldSubtitle}>Loading...</Text>
+        </View>
+      ) : errorMessage ? (
+        <View style={styles.screen}>
+          <View style={{ padding: 20 }}>
+            <Text style={styles.profileFieldSubtitle}>
+              {errorMessage}
+            </Text>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Retry"
+              onPress={() => setRetryKey((current) => current + 1)}
+              style={styles.profileFieldDone}
+            >
+              <Text style={styles.saveText}>Retry</Text>
+            </Pressable>
+          </View>
+        </View>
+      ) : (
+        <>
+          <View style={styles.jobSearchHeader}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Back"
+              hitSlop={10}
+              onPress={() => onBack({ status, workTypes, foundersOnly })}
+              style={styles.jobSearchHeaderAction}
+            >
+              <Image
+                source={require("../assets/back_arrow.png")}
+                style={styles.headlineBackIcon}
+                resizeMode="contain"
+              />
+            </Pressable>
+            <Text style={styles.jobSearchHeaderTitle}>Job Search Profile</Text>
+            <View style={styles.jobSearchHeaderAction} />
+          </View>
+
+          <ScrollView
+            style={styles.scroll}
+            contentContainerStyle={styles.jobSearchContent}
+            showsVerticalScrollIndicator={false}
+          >
+            <Text style={styles.jobSearchQuestion}>
+              Where are you in your job search?
+            </Text>
+
+            <View style={styles.jobSearchStatusOptions}>
+              {JOB_SEARCH_STATUS_OPTIONS.map((option) => {
+                const selected = status === option;
+                return (
+                  <Pressable
+                    key={option}
+                    accessibilityRole="radio"
+                    accessibilityState={{ checked: selected }}
+                    onPress={() => setStatus(option)}
+                    style={styles.jobSearchStatusOption}
+                  >
+                    <View
+                      style={[
+                        styles.jobSearchRadio,
+                        selected && styles.jobSearchRadioSelected,
+                      ]}
+                    >
+                      {selected ? <View style={styles.jobSearchRadioDot} /> : null}
+                    </View>
+                    <Text style={styles.jobSearchOptionText}>{option}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+
+            <Text style={styles.jobSearchWorkQuestion}>
+              What type of work you are looking for?
+            </Text>
+            <View style={styles.jobSearchWorkTypes}>
+              {JOB_SEARCH_WORK_TYPES.map((workType) => {
+                const selected = workTypes.includes(workType);
+                return (
+                  <Pressable
+                    key={workType}
+                    accessibilityRole="checkbox"
+                    accessibilityState={{ checked: selected }}
+                    onPress={() => toggleWorkType(workType)}
+                    style={[
+                      styles.jobSearchWorkType,
+                      workType === "Internship" && styles.jobSearchInternship,
+                      selected && styles.jobSearchWorkTypeSelected,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.jobSearchWorkTypeText,
+                        selected && styles.jobSearchWorkTypeTextSelected,
+                      ]}
+                    >
+                      {workType}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+
+            <Pressable
+              accessibilityRole="checkbox"
+              accessibilityState={{ checked: foundersOnly }}
+              onPress={() => setFoundersOnly((current) => !current)}
+              style={styles.jobSearchFounderOption}
+            >
+              <View
+                style={[
+                  styles.jobSearchCheckbox,
+                  foundersOnly && styles.jobSearchCheckboxSelected,
+                ]}
+              >
+                {foundersOnly ? (
+                  <Text style={styles.jobSearchCheckboxCheck}>✓</Text>
+                ) : null}
+              </View>
+              <Text style={styles.jobSearchFounderOptionText}>
+                Allow only founders who are hiring to see where I am in my job
+                search
+              </Text>
+            </Pressable>
+          </ScrollView>
+        </>
+      )}
+    </View>
+  );
+}
+
+function BioExperiencePickerField({
+  fieldKey,
+  label,
+  value,
+  options,
+  loading,
+  errorMessage,
+  isOpen,
+  onToggle,
+  onSelect,
+  onClose,
+  onRetry,
+  fieldStyle,
+  styles,
+}) {
+  const selectedOption = options.find(
+    (option) =>
+      String(option.value) === String(value) || option.label === String(value),
+  );
+  const displayedValue = selectedOption?.label || value;
+
+  return (
+    <View>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={label}
+        accessibilityState={{ expanded: isOpen }}
+        onPress={onToggle}
+        style={[styles.bioExperienceFieldRow, fieldStyle]}
+      >
+        <Text
+          style={[
+            styles.bioExperienceFieldText,
+            !displayedValue && styles.bioExperiencePlaceholder,
+          ]}
+          numberOfLines={1}
+        >
+          {displayedValue || label}
+        </Text>
+        <Text style={styles.bioExperienceChevron}>▼</Text>
+      </Pressable>
+
+      <Modal
+        visible={isOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={onClose}
+      >
+        <Pressable style={styles.bioExperienceModalBackdrop} onPress={onClose}>
+          <Pressable
+            style={styles.bioExperienceModalCard}
+            onPress={() => {}}
+          >
+            <Text style={styles.bioExperienceModalTitle}>Select {label}</Text>
+            {loading ? (
+              <ActivityIndicator color="#2dbcc4" />
+            ) : errorMessage ? (
+              <View>
+                <Text style={styles.bioExperienceModalError}>
+                  {errorMessage}
+                </Text>
+                <Pressable onPress={onRetry}>
+                  <Text style={styles.bioExperienceRetry}>Retry</Text>
+                </Pressable>
+              </View>
+            ) : options.length ? (
+              <ScrollView
+                style={styles.bioExperienceModalList}
+                showsVerticalScrollIndicator={false}
+              >
+                {options.map((option) => (
+                  <Pressable
+                    key={`${fieldKey}-${option.value}`}
+                    onPress={() => onSelect(option)}
+                    style={styles.bioExperienceModalOption}
+                  >
+                    <Text style={styles.bioExperienceModalOptionText}>
+                      {option.label}
+                    </Text>
+                    {option.description ? (
+                      <Text style={styles.bioExperienceModalDescription}>
+                        {option.description}
+                      </Text>
+                    ) : null}
+                  </Pressable>
+                ))}
+              </ScrollView>
+            ) : (
+              <Text style={styles.bioExperienceModalError}>
+                No options are available.
+              </Text>
+            )}
+          </Pressable>
+        </Pressable>
+      </Modal>
+    </View>
+  );
+}
+
+function BioExperienceProfileEditScreen({
+  initialValue,
+  onBack,
+  onDone,
+  metrics,
+}) {
+  const styles = createStyles(metrics);
+  const [form, setForm] = useState(initialValue);
+  const [optionsByField, setOptionsByField] = useState({});
+  const [loadingByField, setLoadingByField] = useState(() =>
+    Object.fromEntries(
+      Object.keys(BIO_EXPERIENCE_PICKER_FIELDS).map((fieldKey) => [
+        fieldKey,
+        true,
+      ]),
+    ),
+  );
+  const [errorByField, setErrorByField] = useState({});
+  const [openDropdown, setOpenDropdown] = useState("");
+  const [retryKey, setRetryKey] = useState(0);
+  const [iosDatePickerTarget, setIosDatePickerTarget] = useState("");
+  const [iosTempDate, setIosTempDate] = useState(new Date());
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadOptions() {
+      setLoadingByField(
+        Object.fromEntries(
+          Object.keys(BIO_EXPERIENCE_PICKER_FIELDS).map((fieldKey) => [
+            fieldKey,
+            true,
+          ]),
+        ),
+      );
+      setErrorByField({});
+
+      await Promise.all(
+        Object.entries(BIO_EXPERIENCE_PICKER_FIELDS).map(
+          async ([fieldKey, config]) => {
+            try {
+              const response = await apiFetch(config.endpoint, {
+                method: "GET",
+                headers: { "Content-Type": "application/json" },
+              });
+              if (!response.ok) {
+                throw new Error(`${response.status}`);
+              }
+              const payload = await response.json();
+              const list = Array.isArray(payload)
+                ? payload
+                : Array.isArray(payload?.data)
+                  ? payload.data
+                  : Array.isArray(payload?.location_types)
+                    ? payload.location_types
+                    : Array.isArray(payload?.locationTypes)
+                      ? payload.locationTypes
+                      : [];
+              const options = list
+                .map((item) =>
+                  toBioExperienceOption(item, config.responseKey),
+                )
+                .filter((option) => Boolean(option.label));
+
+              if (isMounted) {
+                setOptionsByField((current) => ({
+                  ...current,
+                  [fieldKey]: options,
+                }));
+              }
+            } catch {
+              if (isMounted) {
+                setErrorByField((current) => ({
+                  ...current,
+                  [fieldKey]: `Could not load ${config.label.toLowerCase()}.`,
+                }));
+                setOptionsByField((current) => ({
+                  ...current,
+                  [fieldKey]: [],
+                }));
+              }
+            } finally {
+              if (isMounted) {
+                setLoadingByField((current) => ({
+                  ...current,
+                  [fieldKey]: false,
+                }));
+              }
+            }
+          },
+        ),
+      );
+    }
+
+    void loadOptions();
+    return () => {
+      isMounted = false;
+    };
+  }, [retryKey]);
+
+  function updateField(field, value) {
+    setForm((current) => ({ ...current, [field]: value }));
+  }
+
+  function getFieldLabel(fieldKey) {
+    const value = form[fieldKey];
+    return (
+      optionsByField[fieldKey]?.find(
+        (option) =>
+          String(option.value) === String(value) ||
+          option.label === String(value),
+      )?.label || value || ""
+    );
+  }
+
+  function setDateField(target, date) {
+    if (!date) return;
+    updateField(target, date.toISOString());
+    if (target === "startDate" && form.endDate) {
+      const currentEndDate = parseBioExperienceDate(form.endDate);
+      if (currentEndDate && date > currentEndDate) {
+        updateField("endDate", "");
+      }
+    }
+  }
+
+  function openDatePicker(target) {
+    if (target === "endDate" && form.currentlyWorkHere) return;
+    setOpenDropdown("");
+    if (Platform.OS === "web") return;
+    if (Platform.OS === "ios") {
+      const currentDate = form[target] ? new Date(form[target]) : new Date();
+      setIosTempDate(
+        Number.isNaN(currentDate.getTime()) ? new Date() : currentDate,
+      );
+      setIosDatePickerTarget(target);
+      return;
+    }
+    DateTimePickerAndroid.open({
+      value: getBioExperienceDateValue(form[target]),
+      mode: "date",
+      display: "default",
+      maximumDate: new Date(),
+      minimumDate: target === "endDate" ? parsedStartDate : undefined,
+      onChange: (event, date) => handleNativeDateChange(event, date, target),
+    });
+  }
+
+  function handleNativeDateChange(event, date, target) {
+    if (event?.type !== "dismissed" && date) setDateField(target, date);
+  }
+
+  function renderDateField(target, label) {
+    const value = form[target];
+    const dateText = formatBioExperienceDate(value);
+
+    if (Platform.OS === "web") {
+      const dateValue = value ? String(value).slice(0, 10) : "";
+      return (
+        <View
+          style={[
+            styles.bioExperienceWebDateField,
+            target === "endDate" &&
+              form.currentlyWorkHere &&
+              styles.bioExperienceDisabledDateField,
+          ]}
+        >
+          <Text
+            pointerEvents="none"
+            style={[
+              styles.bioExperienceWebDateLabel,
+              !dateText && styles.bioExperiencePlaceholder,
+            ]}
+          >
+            {dateText || label}
+          </Text>
+          <input
+            aria-label={label}
+            type="date"
+            value={dateValue}
+            max={new Date().toISOString().slice(0, 10)}
+            min={target === "endDate" && parsedStartDate
+              ? parsedStartDate.toISOString().slice(0, 10)
+              : undefined}
+            disabled={target === "endDate" && form.currentlyWorkHere}
+            onChange={(event) => {
+              const nextValue = event.target.value;
+              if (!nextValue) {
+                updateField(target, "");
+                return;
+              }
+              const nextDate = new Date(`${nextValue}T12:00:00`);
+              if (!Number.isNaN(nextDate.getTime())) {
+                setDateField(target, nextDate);
+              }
+            }}
+            style={styles.bioExperienceWebDateInput}
+          />
+        </View>
+      );
+    }
+
+    return (
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={label}
+        onPress={() => openDatePicker(target)}
+        disabled={target === "endDate" && form.currentlyWorkHere}
+        style={[
+          styles.bioExperienceDateField,
+          target === "endDate" &&
+            form.currentlyWorkHere &&
+            styles.bioExperienceDisabledDateField,
+        ]}
+      >
+        <Text
+          style={[
+            styles.bioExperienceFieldText,
+            !dateText && styles.bioExperiencePlaceholder,
+          ]}
+        >
+          {dateText || label}
+        </Text>
+        <BioExperienceCalendarIcon styles={styles} />
+      </Pressable>
+    );
+  }
+
+  const primaryRoleValue = form.primaryRole;
+  const parsedStartDate = parseBioExperienceDate(form.startDate);
+  const secondaryRoleOptions = (optionsByField.secondaryRole || []).filter(
+    (option) => String(option.value) !== String(primaryRoleValue),
+  );
+
+  return (
+    <View style={styles.screen}>
+      <View style={styles.bioExperienceHeader}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Back"
+          hitSlop={10}
+          onPress={onBack}
+          style={styles.bioExperienceHeaderAction}
+        >
+          <Image
+            source={require("../assets/back_arrow.png")}
+            style={styles.headlineBackIcon}
+            resizeMode="contain"
+          />
+        </Pressable>
+        <Text style={styles.bioExperienceHeaderTitle}>Bio &amp; Experience</Text>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Done"
+          onPress={() =>
+            onDone({
+              ...form,
+              fundingStageLabel: getFieldLabel("fundingStage"),
+              riskAppetiteLabel: getFieldLabel("riskAppetite"),
+              employmentTypeLabel: getFieldLabel("employmentType"),
+              locationTypeLabel: getFieldLabel("locationType"),
+              primaryRoleLabel: getFieldLabel("primaryRole"),
+              secondaryRoleLabel: getFieldLabel("secondaryRole"),
+            })
+          }
+          style={styles.bioExperienceDoneButton}
+        >
+          <Text style={styles.bioExperienceDoneText}>Done</Text>
+        </Pressable>
+      </View>
+
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.bioExperienceContent}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
+        <BioExperiencePickerField
+          fieldKey="fundingStage"
+          label="Funding Stage"
+          value={form.fundingStage}
+          options={optionsByField.fundingStage || []}
+          loading={Boolean(loadingByField.fundingStage)}
+          errorMessage={errorByField.fundingStage}
+          isOpen={openDropdown === "fundingStage"}
+          onToggle={() =>
+            setOpenDropdown((current) =>
+              current === "fundingStage" ? "" : "fundingStage",
+            )
+          }
+          onSelect={(option) => {
+            updateField("fundingStage", option.value);
+            setOpenDropdown("");
+          }}
+          onClose={() => setOpenDropdown("")}
+          onRetry={() => setRetryKey((current) => current + 1)}
+          styles={styles}
+        />
+        <BioExperiencePickerField
+          fieldKey="riskAppetite"
+          label="Risk Appetite"
+          value={form.riskAppetite}
+          options={optionsByField.riskAppetite || []}
+          loading={Boolean(loadingByField.riskAppetite)}
+          errorMessage={errorByField.riskAppetite}
+          isOpen={openDropdown === "riskAppetite"}
+          onToggle={() =>
+            setOpenDropdown((current) =>
+              current === "riskAppetite" ? "" : "riskAppetite",
+            )
+          }
+          onSelect={(option) => {
+            updateField("riskAppetite", option.value);
+            setOpenDropdown("");
+          }}
+          onClose={() => setOpenDropdown("")}
+          onRetry={() => setRetryKey((current) => current + 1)}
+          styles={styles}
+        />
+        <BioExperiencePickerField
+          fieldKey="employmentType"
+          label="Employment Type"
+          value={form.employmentType}
+          options={optionsByField.employmentType || []}
+          loading={Boolean(loadingByField.employmentType)}
+          errorMessage={errorByField.employmentType}
+          isOpen={openDropdown === "employmentType"}
+          onToggle={() =>
+            setOpenDropdown((current) =>
+              current === "employmentType" ? "" : "employmentType",
+            )
+          }
+          onSelect={(option) => {
+            updateField("employmentType", option.value);
+            setOpenDropdown("");
+          }}
+          onClose={() => setOpenDropdown("")}
+          onRetry={() => setRetryKey((current) => current + 1)}
+          styles={styles}
+        />
+
+        <TextInput
+          accessibilityLabel="Company Name"
+          style={styles.bioExperienceTextInput}
+          value={form.companyName}
+          onChangeText={(value) => updateField("companyName", value)}
+          placeholder="Company Name"
+          placeholderTextColor="#a2a2a2"
+          autoCapitalize="words"
+          autoCorrect={false}
+        />
+        <TextInput
+          accessibilityLabel="Location"
+          style={styles.bioExperienceTextInput}
+          value={form.location}
+          onChangeText={(value) => updateField("location", value)}
+          placeholder="Location"
+          placeholderTextColor="#a2a2a2"
+          autoCapitalize="words"
+          autoCorrect={false}
+        />
+        <BioExperiencePickerField
+          fieldKey="locationType"
+          label="Location Type"
+          value={form.locationType}
+          options={optionsByField.locationType || []}
+          loading={Boolean(loadingByField.locationType)}
+          errorMessage={errorByField.locationType}
+          isOpen={openDropdown === "locationType"}
+          onToggle={() =>
+            setOpenDropdown((current) =>
+              current === "locationType" ? "" : "locationType",
+            )
+          }
+          onSelect={(option) => {
+            updateField("locationType", option.value);
+            setOpenDropdown("");
+          }}
+          onClose={() => setOpenDropdown("")}
+          onRetry={() => setRetryKey((current) => current + 1)}
+          styles={styles}
+        />
+
+        {renderDateField("startDate", "Start Date")}
+        <Pressable
+          accessibilityRole="checkbox"
+          accessibilityState={{ checked: form.currentlyWorkHere }}
+          onPress={() => {
+            const nextValue = !form.currentlyWorkHere;
+            updateField("currentlyWorkHere", nextValue);
+            if (nextValue) updateField("endDate", "");
+          }}
+          style={styles.bioExperienceCurrentRow}
+        >
+          <View
+            style={[
+              styles.bioExperienceCheckbox,
+              form.currentlyWorkHere && styles.bioExperienceCheckboxSelected,
+            ]}
+          >
+            {form.currentlyWorkHere ? (
+              <Text style={styles.bioExperienceCheckboxCheck}>✓</Text>
+            ) : null}
+          </View>
+          <Text style={styles.bioExperienceCurrentText}>
+            I currently work here
+          </Text>
+        </Pressable>
+        {renderDateField("endDate", "End Date")}
+
+        <TextInput
+          accessibilityLabel="Title"
+          style={styles.bioExperienceTextInput}
+          value={form.title}
+          onChangeText={(value) => updateField("title", value)}
+          placeholder="Title"
+          placeholderTextColor="#a2a2a2"
+          autoCapitalize="words"
+          autoCorrect={false}
+        />
+        <BioExperiencePickerField
+          fieldKey="primaryRole"
+          label="Primary Role"
+          value={form.primaryRole}
+          options={optionsByField.primaryRole || []}
+          loading={Boolean(loadingByField.primaryRole)}
+          errorMessage={errorByField.primaryRole}
+          isOpen={openDropdown === "primaryRole"}
+          onToggle={() =>
+            setOpenDropdown((current) =>
+              current === "primaryRole" ? "" : "primaryRole",
+            )
+          }
+          onSelect={(option) => {
+            updateField("primaryRole", option.value);
+            if (String(form.secondaryRole) === String(option.value)) {
+              updateField("secondaryRole", "");
+            }
+            setOpenDropdown("");
+          }}
+          onClose={() => setOpenDropdown("")}
+          onRetry={() => setRetryKey((current) => current + 1)}
+          fieldStyle={styles.bioExperiencePrimaryRoleRow}
+          styles={styles}
+        />
+        <TextInput
+          accessibilityLabel="Years Of Experience"
+          style={styles.bioExperienceTextInput}
+          value={form.yearsOfExperience}
+          onChangeText={(value) => updateField("yearsOfExperience", value)}
+          placeholder="Years Of Experience"
+          placeholderTextColor="#a2a2a2"
+          keyboardType="number-pad"
+        />
+        <BioExperiencePickerField
+          fieldKey="secondaryRole"
+          label="Secondary Role (Optional)"
+          value={form.secondaryRole}
+          options={secondaryRoleOptions}
+          loading={Boolean(loadingByField.secondaryRole)}
+          errorMessage={errorByField.secondaryRole}
+          isOpen={openDropdown === "secondaryRole"}
+          onToggle={() =>
+            setOpenDropdown((current) =>
+              current === "secondaryRole" ? "" : "secondaryRole",
+            )
+          }
+          onSelect={(option) => {
+            updateField("secondaryRole", option.value);
+            setOpenDropdown("");
+          }}
+          onClose={() => setOpenDropdown("")}
+          onRetry={() => setRetryKey((current) => current + 1)}
+          fieldStyle={styles.bioExperienceSecondaryRoleRow}
+          styles={styles}
+        />
+        <TextInput
+          accessibilityLabel="Bio"
+          style={[styles.bioExperienceTextInput, styles.bioExperienceLongInput]}
+          value={form.bio}
+          onChangeText={(value) => updateField("bio", value)}
+          placeholder="Bio"
+          placeholderTextColor="#a2a2a2"
+          autoCapitalize="sentences"
+          autoCorrect={false}
+          multiline
+          textAlignVertical="top"
+        />
+        <TextInput
+          accessibilityLabel="Startup Idea"
+          style={[styles.bioExperienceTextInput, styles.bioExperienceLongInput]}
+          value={form.startupIdea}
+          onChangeText={(value) => updateField("startupIdea", value)}
+          placeholder="Startup Idea"
+          placeholderTextColor="#a2a2a2"
+          autoCapitalize="sentences"
+          autoCorrect={false}
+          multiline
+          textAlignVertical="top"
+        />
+      </ScrollView>
+
+      {Platform.OS === "ios" ? (
+        <Modal
+          visible={Boolean(iosDatePickerTarget)}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setIosDatePickerTarget("")}
+        >
+          <Pressable
+            style={styles.bioExperienceModalBackdrop}
+            onPress={() => setIosDatePickerTarget("")}
+          >
+            <Pressable
+              style={styles.bioExperienceDateModalCard}
+              onPress={() => {}}
+            >
+              <Text style={styles.bioExperienceModalTitle}>
+                {iosDatePickerTarget === "startDate" ? "Start Date" : "End Date"}
+              </Text>
+              <DateTimePicker
+                value={iosTempDate}
+                mode="date"
+                display="spinner"
+                maximumDate={new Date()}
+                minimumDate={
+                  iosDatePickerTarget === "endDate" && parsedStartDate
+                    ? parsedStartDate
+                    : undefined
+                }
+                onChange={(_event, date) => {
+                  if (date) setIosTempDate(date);
+                }}
+                style={styles.bioExperienceIosDatePicker}
+              />
+              <View style={styles.bioExperienceDateActions}>
+                <Pressable
+                  onPress={() => setIosDatePickerTarget("")}
+                  style={styles.bioExperienceDateAction}
+                >
+                  <Text style={styles.bioExperienceDateActionText}>Cancel</Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => {
+                    setDateField(iosDatePickerTarget, iosTempDate);
+                    setIosDatePickerTarget("");
+                  }}
+                  style={styles.bioExperienceDateAction}
+                >
+                  <Text style={styles.bioExperienceDateActionText}>Confirm</Text>
+                </Pressable>
+              </View>
+            </Pressable>
+          </Pressable>
+        </Modal>
+      ) : null}
+    </View>
+  );
+}
+
+function BioExperienceCalendarIcon({ styles }) {
+  return (
+    <View style={styles.bioExperienceCalendarIcon}>
+      <View style={styles.bioExperienceCalendarTop} />
+      <View style={styles.bioExperienceCalendarGrid}>
+        {Array.from({ length: 6 }, (_, index) => (
+          <View key={index} style={styles.bioExperienceCalendarDot} />
+        ))}
+      </View>
+    </View>
+  );
+}
+
 function ProfileRadioOption({ label, selected, onPress, styles }) {
   return (
     <Pressable
@@ -318,14 +1346,151 @@ function ProfileRadioOption({ label, selected, onPress, styles }) {
   );
 }
 
-function LocationProfileEditScreen({ initialLocation, onDone, metrics }) {
+function LocationProfileEditScreen({
+  initialLocation,
+  locationPreferenceQuestions = [],
+  initialCities = [],
+  onDone,
+  metrics,
+}) {
   const styles = createStyles(metrics);
-  const [city, setCity] = useState(initialLocation.city);
-  const [openToRemote, setOpenToRemote] = useState(initialLocation.openToRemote);
-  const [workPreference, setWorkPreference] = useState(initialLocation.workPreference);
+  const [city, setCity] = useState(initialLocation?.city || "");
+  const [isPickingCity, setIsPickingCity] = useState(false);
+  const [openToRemote, setOpenToRemote] = useState(
+    initialLocation.openToRemote,
+  );
+  const [workPreference, setWorkPreference] = useState(
+    initialLocation.workPreference,
+  );
   const [willingToRelocate, setWillingToRelocate] = useState(
     initialLocation.willingToRelocate,
   );
+
+  const [selectedAnswers, setSelectedAnswers] = useState(() => {
+    const savedAnswers = Array.isArray(initialLocation?.selectedAnswers)
+      ? initialLocation.selectedAnswers
+      : [];
+
+    const answersFromList = savedAnswers.reduce((accumulator, item) => {
+      const questionId = item?.question_id ?? item?.id;
+      const answerId = item?.selected_answer_id ?? item?.answer_id;
+
+      if (questionId != null && answerId != null) {
+        accumulator[String(questionId)] = String(answerId);
+      }
+      return accumulator;
+    }, {});
+
+    if (Array.isArray(initialLocation?.selectedAnswers)) {
+      return answersFromList;
+    }
+
+    const savedAnswerMap = initialLocation?.selectedAnswers;
+    if (!savedAnswerMap || typeof savedAnswerMap !== "object") {
+      return {};
+    }
+
+    return Object.entries(savedAnswerMap).reduce(
+      (accumulator, [questionId, answer]) => {
+        const answerId =
+          answer && typeof answer === "object"
+            ? (answer.selected_answer_id ?? answer.answer_id)
+            : answer;
+
+        if (answerId != null) {
+          accumulator[String(questionId)] = String(answerId);
+        }
+        return accumulator;
+      },
+      {},
+    );
+  });
+
+  // console.log(
+  //   "Location preference questions:",
+  //   JSON.stringify(locationPreferenceQuestions, null, 2),
+  // );
+
+  // console.log("Selected answers:", JSON.stringify(selectedAnswers, null, 2));
+
+  const getSelectedAnswer = (searchText) => {
+    const question = locationPreferenceQuestions.find((item) =>
+      (item.question ?? item.question_text ?? "")
+        .toLowerCase()
+        .includes(searchText.toLowerCase()),
+    );
+
+    if (!question) return "";
+
+    const questionId = question.question_id ?? question.id;
+    const selectedAnswerId = selectedAnswers[String(questionId)];
+
+    const answers =
+      question.answers ?? question.options ?? question.answer_options ?? [];
+
+    const selectedOption = answers.find(
+      (answer) =>
+        String(answer.answer_id ?? answer.id) === String(selectedAnswerId),
+    );
+
+    return (
+      selectedOption?.answer ??
+      selectedOption?.answer_text ??
+      selectedOption?.label ??
+      selectedOption?.name ??
+      ""
+    );
+  };
+
+  // const handleDone = () => {
+  //   onDone({
+  //     city: (city || "").trim(),
+  //     openToRemote,
+  //     workPreference,
+  //     willingToRelocate,
+  //     selectedAnswers,
+  //   });
+  // };
+
+  const handleDone = () => {
+    const remoteAnswer = getSelectedAnswer("Are you open to work remotely");
+
+    const workPreference = getSelectedAnswer(
+      "What is your preference in working remotely",
+    );
+
+    const relocationAnswer = getSelectedAnswer("Are you willing to relocate");
+
+    const openToRemote =
+      remoteAnswer.toLowerCase() === "yes"
+        ? "Remote"
+        : remoteAnswer.toLowerCase() === "no"
+          ? "Onsite"
+          : "";
+
+    const willingToRelocate =
+      relocationAnswer.toLowerCase() === "yes"
+        ? true
+        : relocationAnswer.toLowerCase() === "no"
+          ? false
+          : undefined;
+
+    onDone({
+      city: city.trim(),
+      openToRemote,
+      workPreference,
+      willingToRelocate,
+      selectedAnswers,
+    });
+  };
+
+  const handleAnswerSelect = (questionId, answerId) => {
+    setSelectedAnswers((previousAnswers) => ({
+      ...previousAnswers,
+      [questionId]: answerId,
+    }));
+  };
+
   const workOptions = [
     "Hybrid (Onsite or remote)",
     "Onsite preferred",
@@ -333,75 +1498,93 @@ function LocationProfileEditScreen({ initialLocation, onDone, metrics }) {
     "Remote only",
   ];
 
+  if (isPickingCity) {
+    return (
+      <CityPickerScreen
+        initialCities={initialCities}
+        onBack={() => setIsPickingCity(false)}
+        onSelectCity={(selectedCity) => {
+          setCity(selectedCity.label);
+          setIsPickingCity(false);
+        }}
+      />
+    );
+  }
+
   return (
     <View style={styles.screen}>
       <ProfileEditorHeader
         title="Location"
-        onBack={() =>
-          onDone({ city: city.trim(), openToRemote, workPreference, willingToRelocate })
-        }
-        onDone={() =>
-          onDone({ city: city.trim(), openToRemote, workPreference, willingToRelocate })
-        }
+        onBack={handleDone}
+        onDone={handleDone}
         styles={styles}
       />
+
       <ScrollView
         contentContainerStyle={styles.profileLocationContent}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
         <Text style={styles.profileFieldSubtitle}>Where are you based?</Text>
-        <TextInput
-          accessibilityLabel="Your city"
-          value={city}
-          onChangeText={setCity}
-          placeholder="Your city*"
-          placeholderTextColor="#7d879e"
-          autoCapitalize="words"
-          style={styles.profileUnderlineInput}
-        />
-        <Text style={styles.profileLocationQuestion}>
-          Are you open to work remotely?
-        </Text>
-        <ProfileRadioOption
-          label="Yes"
-          selected={openToRemote}
-          onPress={() => setOpenToRemote(true)}
-          styles={styles}
-        />
-        <ProfileRadioOption
-          label="No"
-          selected={!openToRemote}
-          onPress={() => setOpenToRemote(false)}
-          styles={styles}
-        />
-        <Text style={styles.profileLocationQuestion}>
-          What is your preference of working remotely?
-        </Text>
-        {workOptions.map((option) => (
-          <ProfileRadioOption
-            key={option}
-            label={option}
-            selected={workPreference === option}
-            onPress={() => setWorkPreference(option)}
-            styles={styles}
-          />
-        ))}
-        <Text style={styles.profileLocationQuestion}>
-          Are you willing to relocate?
-        </Text>
-        <ProfileRadioOption
-          label="Yes"
-          selected={willingToRelocate}
-          onPress={() => setWillingToRelocate(true)}
-          styles={styles}
-        />
-        <ProfileRadioOption
-          label="No"
-          selected={!willingToRelocate}
-          onPress={() => setWillingToRelocate(false)}
-          styles={styles}
-        />
+        <View style={styles.profileFieldRow}>
+          {/* <Text style={styles.profileFieldLabel}>City</Text> */}
+
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Select City"
+            onPress={() => setIsPickingCity(true)}
+            style={styles.profileDateInput}
+          >
+            <Text
+              style={[
+                styles.profileDateText,
+                !city && styles.profileFieldPlaceholder,
+              ]}
+            >
+              {city || "Select City"}
+            </Text>
+          </Pressable>
+        </View>
+        {locationPreferenceQuestions.map((question) => {
+          const questionId = question.question_id ?? question.id;
+
+          const answers =
+            question.answers ??
+            question.options ??
+            question.answer_options ??
+            [];
+
+          return (
+            <View key={questionId}>
+              <Text style={styles.profileLocationQuestion}>
+                {question.question}
+              </Text>
+              {answers.map((answer) => {
+                const questionId = question.question_id ?? question.id;
+                const answerId = answer.answer_id ?? answer.id;
+
+                const isSelected =
+                  String(selectedAnswers[questionId] ?? "") ===
+                  String(answerId ?? "");
+
+                return (
+                  <ProfileRadioOption
+                    styles={styles}
+                    key={answerId}
+                    label={
+                      answer.answer ??
+                      answer.answer_text ??
+                      answer.label ??
+                      answer.name
+                    }
+                    selected={isSelected}
+                    onPress={() => handleAnswerSelect(questionId, answerId)}
+                  />
+                );
+              })}
+            </View>
+          );
+        })}
       </ScrollView>
     </View>
   );
@@ -479,14 +1662,25 @@ function ProfileHistorySection({ title, headerIcon, itemIcon, items, styles }) {
       <View style={styles.historyHeader}>
         <Text style={styles.sectionTitle}>{title}</Text>
         <View style={styles.historyHeaderActions}>
-          <Image source={headerIcon} style={styles.historyHeaderIcon} resizeMode="contain" />
+          <Image
+            source={headerIcon}
+            style={styles.historyHeaderIcon}
+            resizeMode="contain"
+          />
           <Text style={styles.addIcon}>+</Text>
         </View>
       </View>
       {items.map((item) => (
-        <View key={`${item.title}-${item.organization}`} style={styles.historyRow}>
+        <View
+          key={`${item.title}-${item.organization}`}
+          style={styles.historyRow}
+        >
           <View style={styles.historyIconWrap}>
-            <Image source={itemIcon} style={styles.historyIcon} resizeMode="contain" />
+            <Image
+              source={itemIcon}
+              style={styles.historyIcon}
+              resizeMode="contain"
+            />
           </View>
           <View style={styles.historyCopy}>
             <Text style={styles.historyTitle} numberOfLines={1}>
@@ -499,7 +1693,10 @@ function ProfileHistorySection({ title, headerIcon, itemIcon, items, styles }) {
               {item.dates}
             </Text>
             <Text
-              style={[styles.historyDescription, item.muted && styles.mutedValue]}
+              style={[
+                styles.historyDescription,
+                item.muted && styles.mutedValue,
+              ]}
               numberOfLines={2}
             >
               {item.description}
@@ -668,7 +1865,6 @@ function WrittenPromptEditScreen({
             style={styles.headlineBackIcon}
             resizeMode="contain"
           />
-          
         </Pressable>
         <Text style={styles.headerTitle}>Written Prompt</Text>
         <Pressable
@@ -708,7 +1904,9 @@ function WrittenPromptEditScreen({
                 <Pressable
                   key={`${String(prompt.id)}-${index}`}
                   accessibilityRole="button"
-                  accessibilityState={{ selected: selectedPrompt === prompt.text }}
+                  accessibilityState={{
+                    selected: selectedPrompt === prompt.text,
+                  }}
                   onPress={() => {
                     setSelectedPrompt(prompt.text);
                     setIsPromptListOpen(false);
@@ -773,7 +1971,13 @@ const COMMITMENT_LEVELS = [
 
 const MIN_FOUNDERS = 0;
 const MAX_FOUNDERS = 10;
-const SKILL_OPTIONS = ["AI/ML", "Design", "Engineering", "Operations", "Sales/Marketing"];
+const SKILL_OPTIONS = [
+  "AI/ML",
+  "Design",
+  "Engineering",
+  "Operations",
+  "Sales/Marketing",
+];
 const EQUITY_SPLIT_OPTIONS = [
   "Fully Negotiable",
   "Equal split",
@@ -781,15 +1985,20 @@ const EQUITY_SPLIT_OPTIONS = [
   "Willing to offer specific equity range",
 ];
 
-function MatchingGoalEditScreen({ initialGoal, initialHiring, onDone, metrics }) {
+function MatchingGoalEditScreen({
+  initialGoal,
+  initialHiring,
+  onDone,
+  metrics,
+}) {
   const styles = createStyles(metrics);
   const [selectedGoal, setSelectedGoal] = useState(initialGoal);
   const [isHiring, setIsHiring] = useState(initialHiring);
   const [matchingGoals, setMatchingGoals] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [errorMessage, setErrorMessage] = useState('');
+  const [errorMessage, setErrorMessage] = useState("");
   const [retryKey, setRetryKey] = useState(0);
-  const MATCHING_GOALS_ENDPOINT = '/matching-goals';
+  const MATCHING_GOALS_ENDPOINT = "/matching-goals";
 
   useEffect(() => {
     let isMounted = true;
@@ -797,12 +2006,12 @@ function MatchingGoalEditScreen({ initialGoal, initialHiring, onDone, metrics })
     const fetchMatchingGoals = async () => {
       try {
         setLoading(true);
-        setErrorMessage('');
+        setErrorMessage("");
 
         const response = await apiFetch(MATCHING_GOALS_ENDPOINT, {
-          method: 'GET',
+          method: "GET",
           headers: {
-            'Content-Type': 'application/json',
+            "Content-Type": "application/json",
           },
         });
 
@@ -819,7 +2028,7 @@ function MatchingGoalEditScreen({ initialGoal, initialHiring, onDone, metrics })
 
         // Extract matching_goal field from each dictionary
         const goals = list
-          .map(item => String(item?.matching_goal || '').trim())
+          .map((item) => String(item?.matching_goal || "").trim())
           .filter(Boolean);
 
         if (isMounted) {
@@ -832,7 +2041,7 @@ function MatchingGoalEditScreen({ initialGoal, initialHiring, onDone, metrics })
         }
       } catch {
         if (isMounted) {
-          setErrorMessage('Could not load matching goals. Please try again.');
+          setErrorMessage("Could not load matching goals. Please try again.");
         }
       } finally {
         if (isMounted) {
@@ -887,7 +2096,9 @@ function MatchingGoalEditScreen({ initialGoal, initialHiring, onDone, metrics })
           </View>
         ) : (
           <>
-            <Text style={styles.matchingGoalSubtitle}>Select Your matching goal</Text>
+            <Text style={styles.matchingGoalSubtitle}>
+              Select Your matching goal
+            </Text>
             {matchingGoals.map((goal) => {
               const selected = selectedGoal === goal;
               return (
@@ -927,9 +2138,13 @@ function MatchingGoalEditScreen({ initialGoal, initialHiring, onDone, metrics })
                     isHiring === hiring && styles.hiringRadioSelected,
                   ]}
                 >
-                  {isHiring === hiring ? <View style={styles.hiringRadioDot} /> : null}
+                  {isHiring === hiring ? (
+                    <View style={styles.hiringRadioDot} />
+                  ) : null}
                 </View>
-                <Text style={styles.hiringOptionText}>{hiring ? "Yes" : "No"}</Text>
+                <Text style={styles.hiringOptionText}>
+                  {hiring ? "Yes" : "No"}
+                </Text>
               </Pressable>
             ))}
           </>
@@ -944,9 +2159,9 @@ function CommitmentLevelEditScreen({ initialLevel, onDone, metrics }) {
   const [selectedLevel, setSelectedLevel] = useState(initialLevel);
   const [commitmentLevels, setCommitmentLevels] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [errorMessage, setErrorMessage] = useState('');
+  const [errorMessage, setErrorMessage] = useState("");
   const [retryKey, setRetryKey] = useState(0);
-  const COMMITMENT_LEVELS_ENDPOINT = '/commitment-levels';
+  const COMMITMENT_LEVELS_ENDPOINT = "/commitment-levels";
 
   useEffect(() => {
     let isMounted = true;
@@ -954,17 +2169,19 @@ function CommitmentLevelEditScreen({ initialLevel, onDone, metrics }) {
     const fetchCommitmentLevels = async () => {
       try {
         setLoading(true);
-        setErrorMessage('');
+        setErrorMessage("");
 
         const response = await apiFetch(COMMITMENT_LEVELS_ENDPOINT, {
-          method: 'GET',
+          method: "GET",
           headers: {
-            'Content-Type': 'application/json',
+            "Content-Type": "application/json",
           },
         });
 
         if (!response.ok) {
-          throw new Error(`Failed to load commitment levels: ${response.status}`);
+          throw new Error(
+            `Failed to load commitment levels: ${response.status}`,
+          );
         }
 
         const payload = await response.json();
@@ -976,7 +2193,7 @@ function CommitmentLevelEditScreen({ initialLevel, onDone, metrics }) {
 
         // Extract commitment_level field from each dictionary
         const levels = list
-          .map(item => String(item?.commitment_level || '').trim())
+          .map((item) => String(item?.commitment_level || "").trim())
           .filter(Boolean);
 
         if (isMounted) {
@@ -989,7 +2206,9 @@ function CommitmentLevelEditScreen({ initialLevel, onDone, metrics }) {
         }
       } catch {
         if (isMounted) {
-          setErrorMessage('Could not load commitment levels. Please try again.');
+          setErrorMessage(
+            "Could not load commitment levels. Please try again.",
+          );
         }
       } finally {
         if (isMounted) {
@@ -1181,7 +2400,10 @@ function NumberOfFoundersEditScreen({ initialCount, onDone, metrics }) {
           >
             <Text style={styles.founderCounterMinus}>-</Text>
           </Pressable>
-          <Text accessibilityLabel="Founder count" style={styles.founderCounterValue}>
+          <Text
+            accessibilityLabel="Founder count"
+            style={styles.founderCounterValue}
+          >
             {founderCount}
           </Text>
           <Pressable
@@ -1203,139 +2425,91 @@ function NumberOfFoundersEditScreen({ initialCount, onDone, metrics }) {
 }
 
 function toSkillModel(item) {
-  // Try multiple possible fields for the skill name/label
-  const skillName = String(
-    item?.skill_name ||
-    item?.skillName ||
-    item?.label ||
-    item?.name ||
-    item?.title ||
-    item?.description ||
-    item?.skill_title ||
-    item?.skill_description ||
-    item?.display_name ||
-    item?.displayName ||
-    item?.skill ||
-    item?.value ||
-    item?.expertise ||
-    item?.tech ||
-    item?.technology ||
-    ""
+  const label = String(
+    item?.skill_name || item?.skillName || item?.skillName || item?.name || "",
   ).trim();
-
-  if (!skillName) {
+  if (!label) {
     return null;
   }
-
-  // Try multiple possible fields for the skill ID/value
-  const value =
-    item?.id ||
-    item?.skill_id ||
-    item?.skillId ||
-    item?.code ||
-    item?.skill_code ||
-    item?.skillCode ||
-    skillName; // fallback to skillName if no ID field found
-
-  return { value, skillName };
+  return { value: item?.id ?? label, label };
 }
 
-function SkillsExpertiseEditScreen({ initialSkills, initialOptions, onDone, metrics }) {
+function SkillsExpertiseEditScreen({
+  firebaseToken,
+  initialSkills,
+  initialOptions,
+  onDone,
+  metrics,
+}) {
   const styles = createStyles(metrics);
   const [skillOptions, setSkillOptions] = useState(initialOptions);
-  const [selectedSkills, setSelectedSkills] = useState(() => {
-    if (Array.isArray(initialSkills)) {
-      return initialSkills
-        .map((value) => {
-          if (typeof value === 'number') {
-            return value;
-          }
-          return String(value || '').trim();
-        })
-        .filter(Boolean);
-    }
-
-    const single = typeof initialSkills === 'number'
-      ? initialSkills
-      : String(initialSkills || '').trim();
-    return single ? [single] : [];
-  });
+  const [selectedSkills, setSelectedSkills] = useState(initialSkills);
   const [loading, setLoading] = useState(true);
-  const [errorMessage, setErrorMessage] = useState('');
-  const [selectionMessage, setSelectionMessage] = useState('');
+  const [errorMessage, setErrorMessage] = useState("");
+  const [selectionMessage, setSelectionMessage] = useState("");
   const [retryKey, setRetryKey] = useState(0);
-  const USER_SKILLS_ENDPOINT = '/user-skills';
+  const USER_SKILLS_ENDPOINT = "/users/me/profile/skills";
+  const MAX_SKILLS_SELECTION = 5;
 
   useEffect(() => {
     let isMounted = true;
 
-    const fetchUserSkills = async () => {
+    async function loadUserSkills() {
+      setLoading(true);
+      setErrorMessage("");
+
       try {
-        setLoading(true);
-        setErrorMessage('');
-
-        const response = await apiFetch(USER_SKILLS_ENDPOINT, {
-          method: 'GET',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-        });
-
-        if (!response.ok) {
-          throw new Error(`Failed to load user skills: ${response.status}`);
-        }
-
-        const payload = await response.json();
-        const list = Array.isArray(payload)
-          ? payload
-          : Array.isArray(payload?.data)
-            ? payload.data
-            : [];
-
-        const mapped = list
+        const [skillsPayload, selectedPayload] = await Promise.all([
+          getUserSkills(firebaseToken),
+          getUserProfileSelectedSkills(firebaseToken),
+        ]);
+        const mapped = skillsPayload.map(toSkillModel).filter(Boolean);
+        const selected = selectedPayload
           .map(toSkillModel)
-          .filter((item) => Boolean(item?.label));
+          .filter(Boolean)
+          .map(
+            (skill) =>
+              mapped.find(
+                (option) =>
+                  option.value === skill.value || option.label === skill.label,
+              )?.value,
+          )
+          .filter((value) => value !== undefined)
+          .slice(0, MAX_SKILLS_SELECTION);
 
         if (isMounted) {
           setSkillOptions(mapped);
-          setSelectedSkills((prev) => prev.map((selectedSkill) => {
-            const matchedSkill = mapped.find((item) => (
-              item.value === selectedSkill || item.label === selectedSkill
-            ));
-            return matchedSkill ? matchedSkill.value : selectedSkill;
-          }));
+          setSelectedSkills(selected);
         }
       } catch {
         if (isMounted) {
-          setErrorMessage('Could not load user skills. Please try again.');
+          setErrorMessage("Could not load user skills. Please try again.");
         }
       } finally {
         if (isMounted) {
           setLoading(false);
         }
       }
-    };
-
-    fetchUserSkills();
-
+    }
+    loadUserSkills();
     return () => {
       isMounted = false;
     };
-  }, [retryKey, initialOptions]);
+  }, [firebaseToken, retryKey]);
 
   function toggleSkill(value) {
     setSelectedSkills((prev) => {
       if (prev.includes(value)) {
-        setSelectionMessage('');
+        setSelectionMessage("");
         return prev.filter((skill) => skill !== value);
       }
 
       if (prev.length >= 5) {
-        setSelectionMessage('Sorry. You can select upto 5 skills');
+        setSelectionMessage("Sorry. You can select upto 5 skills");
         return prev;
       }
 
-      setSelectionMessage('');
+      setSelectionMessage("");
       return [...prev, value];
     });
   }
@@ -1415,7 +2589,8 @@ function SkillsExpertiseEditScreen({ initialSkills, initialOptions, onDone, metr
               })}
             </View>
             <Text style={styles.skillsHelper}>
-              Include skills and expertise that your cofounders own, if applicable
+              Include skills and expertise that your cofounders own, if
+              applicable
             </Text>
           </>
         )}
@@ -1425,35 +2600,13 @@ function SkillsExpertiseEditScreen({ initialSkills, initialOptions, onDone, metr
 }
 
 function toIndustryModel(item) {
-  // Try multiple possible fields for the industry name/label
   const label = String(
-    item?.industry_name ||
-    item?.industryName ||
-    item?.name ||
-    item?.title ||
-    item?.description ||
-    item?.industry_title ||
-    item?.industry_description ||
-    item?.display_name ||
-    item?.displayName ||
-    ""
+    item?.industry_name || item?.industryName || item?.name || "",
   ).trim();
-
   if (!label) {
     return null;
   }
-
-  // Try multiple possible fields for the industry ID/value
-  const value =
-    item?.id ||
-    item?.industry_id ||
-    item?.industryId ||
-    item?.code ||
-    item?.industry_code ||
-    item?.industryCode ||
-    label; // fallback to label if no ID field found
-
-  return { value, label };
+  return { value: item?.id ?? label, label };
 }
 
 function IndustriesInterestsEditScreen({
@@ -1465,7 +2618,8 @@ function IndustriesInterestsEditScreen({
 }) {
   const styles = createStyles(metrics);
   const [industryOptions, setIndustryOptions] = useState(initialOptions);
-  const [selectedIndustries, setSelectedIndustries] = useState(initialIndustries);
+  const [selectedIndustries, setSelectedIndustries] =
+    useState(initialIndustries);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
   const [selectionMessage, setSelectionMessage] = useState("");
@@ -1480,18 +2634,19 @@ function IndustriesInterestsEditScreen({
       try {
         const [industriesPayload, selectedPayload] = await Promise.all([
           getIndustries(firebaseToken),
-          getMyProfileIndustries(firebaseToken),
+          getUserProfileSelectedIndustries(firebaseToken),
         ]);
         const mapped = industriesPayload.map(toIndustryModel).filter(Boolean);
         const selected = selectedPayload
           .map(toIndustryModel)
           .filter(Boolean)
-          .map((industry) =>
-            mapped.find(
-              (option) =>
-                option.value === industry.value ||
-                option.label === industry.label,
-            )?.value,
+          .map(
+            (industry) =>
+              mapped.find(
+                (option) =>
+                  option.value === industry.value ||
+                  option.label === industry.label,
+              )?.value,
           )
           .filter((value) => value !== undefined)
           .slice(0, MAX_INDUSTRY_SELECTION);
@@ -1637,16 +2792,21 @@ function EquityRangeSlider({ range, onRangeChange, styles }) {
         if (!trackWidthRef.current) {
           return;
         }
-        const delta = Math.round(
-          (gestureState.dx / trackWidthRef.current) * rangeSpan / 5,
-        ) * 5;
+        const delta =
+          Math.round(
+            ((gestureState.dx / trackWidthRef.current) * rangeSpan) / 5,
+          ) * 5;
         const startRange = initialRangeRef.current;
-        const nextValue = Math.max(10, Math.min(90, startRange[handle] + delta));
+        const nextValue = Math.max(
+          10,
+          Math.min(90, startRange[handle] + delta),
+        );
         onRangeChange((currentRange) => {
           const nextRange = [...currentRange];
-          nextRange[handle] = handle === 0
-            ? Math.min(nextValue, currentRange[1] - 5)
-            : Math.max(nextValue, currentRange[0] + 5);
+          nextRange[handle] =
+            handle === 0
+              ? Math.min(nextValue, currentRange[1] - 5)
+              : Math.max(nextValue, currentRange[0] + 5);
           return nextRange;
         });
       },
@@ -1700,15 +2860,20 @@ function EquityRangeSlider({ range, onRangeChange, styles }) {
   );
 }
 
-function EquitySplitEditScreen({ initialOption, initialRange, onDone, metrics }) {
+function EquitySplitEditScreen({
+  initialOption,
+  initialRange,
+  onDone,
+  metrics,
+}) {
   const styles = createStyles(metrics);
   const [selectedOption, setSelectedOption] = useState(initialOption);
   const [equityRange, setEquityRange] = useState(initialRange);
   const [equitySplitOptions, setEquitySplitOptions] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [errorMessage, setErrorMessage] = useState('');
+  const [errorMessage, setErrorMessage] = useState("");
   const [retryKey, setRetryKey] = useState(0);
-  const EQUITY_SPLIT_ENDPOINT = '/equity-split';
+  const EQUITY_SPLIT_ENDPOINT = "/equity-split";
 
   useEffect(() => {
     let isMounted = true;
@@ -1716,17 +2881,19 @@ function EquitySplitEditScreen({ initialOption, initialRange, onDone, metrics })
     const fetchEquitySplitOptions = async () => {
       try {
         setLoading(true);
-        setErrorMessage('');
+        setErrorMessage("");
 
         const response = await apiFetch(EQUITY_SPLIT_ENDPOINT, {
-          method: 'GET',
+          method: "GET",
           headers: {
-            'Content-Type': 'application/json',
+            "Content-Type": "application/json",
           },
         });
 
         if (!response.ok) {
-          throw new Error(`Failed to load equity split options: ${response.status}`);
+          throw new Error(
+            `Failed to load equity split options: ${response.status}`,
+          );
         }
 
         const payload = await response.json();
@@ -1739,21 +2906,21 @@ function EquitySplitEditScreen({ initialOption, initialRange, onDone, metrics })
         // Handle both string arrays and object arrays
         let options = [];
         if (list.length > 0) {
-          if (typeof list[0] === 'string') {
+          if (typeof list[0] === "string") {
             // Array of strings
-            options = list.map(item => String(item).trim()).filter(Boolean);
-          } else if (typeof list[0] === 'object' && list[0] !== null) {
+            options = list.map((item) => String(item).trim()).filter(Boolean);
+          } else if (typeof list[0] === "object" && list[0] !== null) {
             // Array of objects - try common field names
             options = list
-              .map(item =>
+              .map((item) =>
                 String(
                   item?.equity_split_option ||
-                  item?.option ||
-                  item?.label ||
-                  item?.name ||
-                  item?.value ||
-                  ''
-                ).trim()
+                    item?.option ||
+                    item?.label ||
+                    item?.name ||
+                    item?.value ||
+                    "",
+                ).trim(),
               )
               .filter(Boolean);
           }
@@ -1787,15 +2954,20 @@ function EquitySplitEditScreen({ initialOption, initialRange, onDone, metrics })
             "Willing to offer specific equity range",
           ]);
           // Preserve initial selection if it's still valid in the fallback list
-          if (initialOption && ![
-            "Fully Negotiable",
-            "Equal split",
-            "Willing to accept a specific equity range",
-            "Willing to offer specific equity range",
-          ].includes(initialOption)) {
+          if (
+            initialOption &&
+            ![
+              "Fully Negotiable",
+              "Equal split",
+              "Willing to accept a specific equity range",
+              "Willing to offer specific equity range",
+            ].includes(initialOption)
+          ) {
             setSelectedOption(initialOption);
           }
-          setErrorMessage('Could not load equity split options. Please try again.');
+          setErrorMessage(
+            "Could not load equity split options. Please try again.",
+          );
         }
       } finally {
         if (isMounted) {
@@ -1811,11 +2983,12 @@ function EquitySplitEditScreen({ initialOption, initialRange, onDone, metrics })
     };
   }, [retryKey, initialOption]);
 
-  const rangeQuestion = selectedOption === equitySplitOptions[2]
-    ? "What is your equity expectation range?"
-    : selectedOption === equitySplitOptions[3]
-      ? "What's your equity offer range?"
-      : "";
+  const rangeQuestion =
+    selectedOption === equitySplitOptions[2]
+      ? "What is your equity expectation range?"
+      : selectedOption === equitySplitOptions[3]
+        ? "What's your equity offer range?"
+        : "";
 
   return (
     <View style={styles.screen}>
@@ -1904,6 +3077,7 @@ function EquitySplitEditScreen({ initialOption, initialRange, onDone, metrics })
 }
 
 export default function ProfileEditScreen({
+  profile,
   profileImageUrl = "",
   firebaseToken = "",
   initialDateOfBirth = "",
@@ -1920,13 +3094,31 @@ export default function ProfileEditScreen({
   const [isEditingIdea, setIsEditingIdea] = useState(false);
   const [editingPromptIndex, setEditingPromptIndex] = useState(null);
   const [isEditingMatchingGoal, setIsEditingMatchingGoal] = useState(false);
-  const [isEditingCommitmentLevel, setIsEditingCommitmentLevel] = useState(false);
+  const [isEditingCommitmentLevel, setIsEditingCommitmentLevel] =
+    useState(false);
   const [isEditingPriorStartupExperience, setIsEditingPriorStartupExperience] =
     useState(false);
   const [isEditingFounderCount, setIsEditingFounderCount] = useState(false);
   const [isEditingSkills, setIsEditingSkills] = useState(false);
   const [isEditingIndustries, setIsEditingIndustries] = useState(false);
   const [isEditingEquitySplit, setIsEditingEquitySplit] = useState(false);
+  const [isEditingJobSearchProfile, setIsEditingJobSearchProfile] =
+    useState(false);
+  const [isEditingBioExperience, setIsEditingBioExperience] = useState(false);
+  const [isEditingCompensation, setIsEditingCompensation] = useState(false);
+  const [isEditingCompanySize, setIsEditingCompanySize] = useState(false);
+  const [isEditingWorkAuthorization, setIsEditingWorkAuthorization] =
+    useState(false);
+  const [workAuthorization, setWorkAuthorization] = useState(() =>
+    profile?.workAuthorization ??
+    profile?.work_authorization ??
+    profile?.work_authorization_name ??
+    profile?.work_authorization_id ??
+    TALENT_BACKGROUND_ROWS.find((row) =>
+      row.title.startsWith("Work Authorization"),
+    )?.value ??
+    "",
+  );
   const [editingProfileField, setEditingProfileField] = useState("");
   const [matchingGoal, setMatchingGoal] = useState(
     "Have some ideas but open to exploring",
@@ -1938,12 +3130,138 @@ export default function ProfileEditScreen({
     "No prior startup experience",
   );
   const [founderCount, setFounderCount] = useState(0);
-  const [skills, setSkills] = useState([]);
+  const [selectedSkills, setSelectedSkills] = useState([]);
+  const [initialSkills, setInitialSkills] = useState([]);
   const [selectedIndustries, setSelectedIndustries] = useState([]);
   const [industryOptions, setIndustryOptions] = useState([]);
   const [skillOptions, setSkillOptions] = useState([]);
   const [equitySplitOption, setEquitySplitOption] = useState("");
   const [equityRange, setEquityRange] = useState([10, 90]);
+  const [jobSearchProfile, setJobSearchProfile] = useState({
+    status: JOB_SEARCH_STATUS_OPTIONS[0],
+    workTypes: ["Full Time", "Part Time"],
+    foundersOnly: true,
+  });
+  const [bioExperience, setBioExperience] = useState(() => ({
+    fundingStage:
+      profile?.fundingStage ??
+      profile?.funding_stage_name ??
+      profile?.funding_stage_id ??
+      "",
+    riskAppetite:
+      profile?.riskAppetite ??
+      profile?.risk_appetite_name ??
+      profile?.risk_appetite_id ??
+      "",
+    employmentType:
+      profile?.employmentType ??
+      profile?.employment_type_name ??
+      profile?.employment_type_id ??
+      "",
+    companyName: String(
+      profile?.companyName ?? profile?.company_name ?? "",
+    ),
+    location: String(
+      profile?.experienceLocation ??
+        profile?.experience_location ??
+        profile?.linkedinProfilePreview?.firstLocation ??
+        "",
+    ),
+    locationType:
+      profile?.locationType ??
+      profile?.location_type_name ??
+      profile?.location_type_id ??
+      "",
+    startDate: profile?.startDate ?? profile?.start_date ?? "",
+    currentlyWorkHere: [true, 1, "true"].includes(
+      profile?.currentlyWorkHere ?? profile?.currently_work_here ?? false,
+    ),
+    endDate: profile?.endDate ?? profile?.end_date ?? "",
+    title: String(profile?.title ?? ""),
+    primaryRole:
+      profile?.primaryRole ??
+      profile?.primary_role_name ??
+      profile?.primary_role_id ??
+      "",
+    yearsOfExperience: String(
+      profile?.yearsOfExperience ?? profile?.years_of_experience ?? "",
+    ),
+    secondaryRole:
+      profile?.secondaryRole ??
+      profile?.secondary_role_name ??
+      profile?.secondary_role_id ??
+      "",
+    bio: String(profile?.bio ?? ""),
+    startupIdea: String(profile?.startupIdea ?? profile?.startup_idea ?? ""),
+  }));
+  const [compensation, setCompensation] = useState(() => {
+    const values = profile?.compensation || profile || {};
+    const cashExpectation =
+      values.cash_equity_expectation ??
+      values.cashEquityExpectation ??
+      "";
+    const salaryDuration =
+      values.salary_duration ?? values.salaryDuration ?? "";
+    const currency = values.currency || {};
+
+    return {
+      cashEquityExpectationId:
+        values.cash_equity_expectation_id ??
+        values.cashEquityExpectationId ??
+        (typeof cashExpectation === "object" ? cashExpectation.id : null),
+      cashEquityExpectation:
+        typeof cashExpectation === "object"
+          ? cashExpectation.cash_equity_expectation ?? cashExpectation.label ?? ""
+          : cashExpectation,
+      minimumSalaryPreference:
+        values.minimumSalaryPreference ??
+        values.expectedMinimumSalaryPreference ??
+        values.expected_minimum_salary_preference ??
+        "",
+      expectedMinimumSalary: String(
+        values.expected_minimum_salary ??
+          values.expectedMinimumSalary ??
+          "",
+      ),
+      expectedMinimumSalaryId:
+        values.expected_minimum_salary_id ??
+        values.expectedMinimumSalaryId ??
+        null,
+      salaryDurationId:
+        values.salary_duration_id ??
+        values.salaryDurationId ??
+        (typeof salaryDuration === "object" ? salaryDuration.id : null),
+      salaryDuration:
+        typeof salaryDuration === "object"
+          ? salaryDuration.salary_duration ?? salaryDuration.label ?? ""
+          : salaryDuration,
+      currencyId:
+        values.currency_id ??
+        values.currencyId ??
+        currency.currency_id ??
+        currency.id ??
+        null,
+      currencyCode:
+        values.currency_code ??
+        values.currencyCode ??
+        currency.currency_code ??
+        "",
+      currencyName:
+        values.currency_name ?? currency.currency_name ?? "",
+      currencySymbol:
+        values.currency_symbol ?? currency.currency_symbol ?? "",
+    };
+  });
+  const [companySizeInterests, setCompanySizeInterests] = useState(() =>
+    normalizeCompanySizeSelections(
+      profile?.companySizeInterests ??
+        profile?.companySizeInterestLevels ??
+        profile?.company_size_interests ??
+        profile?.company_size_interest_levels ??
+        profile?.company_size_interest_level ??
+        {},
+    ),
+  );
   const [isHiring, setIsHiring] = useState(true);
   const [promptAnswers, setPromptAnswers] = useState(() =>
     PROMPT_SLOTS.map(() => ""),
@@ -1955,11 +3273,14 @@ export default function ProfileEditScreen({
   const [dateOfBirth, setDateOfBirth] = useState(() =>
     normalizeProfileDateOfBirth(initialDateOfBirth),
   );
-  const [profileLocation, setProfileLocation] = useState(undefined);
+  const [profileLocation, setProfileLocation] = useState(
+    profile.locationPreference,
+  );
   const [linkedinUrl, setLinkedinUrl] = useState(undefined);
   const [schedulingLink, setSchedulingLink] = useState(undefined);
   const [profileExperiences, setProfileExperiences] = useState([]);
   const [profileEducation, setProfileEducation] = useState([]);
+  const locationSummary = getLocationSummary(profile, profileLocation);
   const profileScrollOffset = useRef(0);
   const editable = activeTab === "Edit";
 
@@ -1970,14 +3291,20 @@ export default function ProfileEditScreen({
           const data = await getMyProfileLinkedinDetails(firebaseToken);
 
           // Transform experience
-          const experiences = (data.experience || []).map(exp => {
+          const experiences = (data.experience || []).map((exp) => {
             // Format dates
-            let datesStr = '';
+            let datesStr = "";
             if (exp.start_date) {
-              const startMonth = new Date(exp.start_date.year, exp.start_date.month - 1).toLocaleString('en-US', { month: 'short' });
+              const startMonth = new Date(
+                exp.start_date.year,
+                exp.start_date.month - 1,
+              ).toLocaleString("en-US", { month: "short" });
               const startYear = exp.start_date.year;
               if (exp.end_date && !exp.is_current) {
-                const endMonth = new Date(exp.end_date.year, exp.end_date.month - 1).toLocaleString('en-US', { month: 'short' });
+                const endMonth = new Date(
+                  exp.end_date.year,
+                  exp.end_date.month - 1,
+                ).toLocaleString("en-US", { month: "short" });
                 const endYear = exp.end_date.year;
                 datesStr = `${startMonth} ${startYear} - ${endMonth} ${endYear}`;
               } else {
@@ -1989,22 +3316,28 @@ export default function ProfileEditScreen({
               }
             }
             return {
-              title: exp.title || '',
-              organization: exp.company || '',
+              title: exp.title || "",
+              organization: exp.company || "",
               dates: datesStr,
-              description: exp.description || '',
+              description: exp.description || "",
               muted: false,
             };
           });
 
           // Transform education
-          const education = (data.education || []).map(edu => {
-            let datesStr = '';
+          const education = (data.education || []).map((edu) => {
+            let datesStr = "";
             if (edu.start_date) {
-              const startMonth = new Date(edu.start_date.year, edu.start_date.month - 1).toLocaleString('en-US', { month: 'short' });
+              const startMonth = new Date(
+                edu.start_date.year,
+                edu.start_date.month - 1,
+              ).toLocaleString("en-US", { month: "short" });
               const startYear = edu.start_date.year;
               if (edu.end_date) {
-                const endMonth = new Date(edu.end_date.year, edu.end_date.month - 1).toLocaleString('en-US', { month: 'short' });
+                const endMonth = new Date(
+                  edu.end_date.year,
+                  edu.end_date.month - 1,
+                ).toLocaleString("en-US", { month: "short" });
                 const endYear = edu.end_date.year;
                 datesStr = `${startMonth} ${startYear} - ${endMonth} ${endYear}`;
               } else {
@@ -2012,10 +3345,10 @@ export default function ProfileEditScreen({
               }
             }
             return {
-              title: edu.school || '',
-              organization: edu.degree_name || edu.degree || '',
+              title: edu.school || "",
+              organization: edu.degree_name || edu.degree || "",
               dates: datesStr,
-              description: edu.field_of_study || '',
+              description: edu.field_of_study || "",
               muted: false,
             };
           });
@@ -2028,6 +3361,54 @@ export default function ProfileEditScreen({
       }
     }
     fetchLinkedinDetails();
+  }, [firebaseToken]);
+
+  useEffect(() => {
+    async function fetchUserSkills() {
+      if (firebaseToken) {
+        try {
+          const [skillsPayload, selectedPayload] = await Promise.all([
+            getUserSkills(firebaseToken),
+            getUserProfileSelectedSkills(firebaseToken),
+          ]);
+          const mapped = skillsPayload.map(toSkillModel).filter(Boolean);
+          const selected = selectedPayload
+            .map(toSkillModel)
+            .filter(Boolean)
+            .map(
+              (skill) =>
+                mapped.find(
+                  (option) =>
+                    option.value === skill.value ||
+                    option.label === skill.label,
+                )?.value,
+            )
+            .filter((value) => value !== undefined)
+            .slice(0, MAX_SKILLS_SELECTION);
+
+          const initialSkills = selectedPayload
+            .map(toSkillModel)
+            .filter(Boolean)
+            .map(
+              (skill) =>
+                mapped.find(
+                  (option) =>
+                    option.value === skill.value ||
+                    option.label === skill.label,
+                )?.label,
+            )
+            .filter((value) => value !== undefined)
+            .slice(0, MAX_SKILLS_SELECTION);
+
+          setSkillOptions(mapped);
+          setSelectedSkills(selected);
+          setInitialSkills(initialSkills);
+        } catch (error) {
+          console.error("Failed to fetch user skills", error);
+        }
+      }
+    }
+    fetchUserSkills();
   }, [firebaseToken]);
 
   if (isEditingHeadline) {
@@ -2139,10 +3520,11 @@ export default function ProfileEditScreen({
   if (isEditingSkills) {
     return (
       <SkillsExpertiseEditScreen
-        initialSkills={skills}
+        firebaseToken={firebaseToken}
+        initialSkills={selectedSkills}
         initialOptions={skillOptions}
-        onDone={(selectedSkills, options) => {
-          setSkills(selectedSkills);
+        onDone={(skills, options) => {
+          setSelectedSkills(skills);
           setSkillOptions(options);
           setIsEditingSkills(false);
         }}
@@ -2182,6 +3564,74 @@ export default function ProfileEditScreen({
     );
   }
 
+  if (isEditingJobSearchProfile) {
+    return (
+      <JobSearchProfileEditScreen
+        initialValue={jobSearchProfile}
+        onBack={(value) => {
+          setJobSearchProfile(value);
+          setIsEditingJobSearchProfile(false);
+        }}
+        metrics={metrics}
+      />
+    );
+  }
+
+  if (isEditingBioExperience) {
+    return (
+      <BioExperienceProfileEditScreen
+        initialValue={bioExperience}
+        onBack={() => setIsEditingBioExperience(false)}
+        onDone={(value) => {
+          setBioExperience(value);
+          setIsEditingBioExperience(false);
+        }}
+        metrics={metrics}
+      />
+    );
+  }
+
+  if (isEditingCompensation) {
+    return (
+      <CompensationEditScreen
+        initialValue={compensation}
+        onBack={() => setIsEditingCompensation(false)}
+        onDone={(value) => {
+          setCompensation(value);
+          setIsEditingCompensation(false);
+        }}
+        metrics={metrics}
+      />
+    );
+  }
+
+  if (isEditingCompanySize) {
+    return (
+      <CompanySizeProfileEditScreen
+        initialValue={companySizeInterests}
+        onBack={() => setIsEditingCompanySize(false)}
+        onDone={(value) => {
+          setCompanySizeInterests(value);
+          setIsEditingCompanySize(false);
+        }}
+        metrics={metrics}
+      />
+    );
+  }
+
+  if (isEditingWorkAuthorization) {
+    return (
+      <WorkAuthorizationEditScreen
+        initialValue={workAuthorization}
+        onBack={() => setIsEditingWorkAuthorization(false)}
+        onDone={(value) => {
+          setWorkAuthorization(value);
+          setIsEditingWorkAuthorization(false);
+        }}
+      />
+    );
+  }
+
   if (editingProfileField === "name") {
     return (
       <NameProfileEditScreen
@@ -2212,14 +3662,19 @@ export default function ProfileEditScreen({
   if (editingProfileField === "location") {
     return (
       <LocationProfileEditScreen
-        initialLocation={
-          profileLocation || {
-            city: "",
-            openToRemote: true,
-            workPreference: "Hybrid (Onsite or remote)",
-            willingToRelocate: true,
-          }
-        }
+        initialCities={profile.locationDetails?.cities || []}
+        initialLocation={{
+          ...(profileLocation || {}),
+          city:
+            profileLocation?.city ??
+            profile?.locationDetails?.selected_city ??
+            "",
+          selectedAnswers:
+            profileLocation?.selectedAnswers ??
+            profile?.locationPreference ??
+            [],
+        }}
+        locationPreferenceQuestions={profile.locationPreferenceQuestions || []}
         onDone={(value) => {
           setProfileLocation(value);
           setEditingProfileField("");
@@ -2257,6 +3712,72 @@ export default function ProfileEditScreen({
     );
   }
 
+  const backgroundSections =
+    selectedRole === "Both"
+      ? [
+          { title: "My Background as a Founder", rows: BACKGROUND_ROWS },
+          { title: "My Background as a Talent", rows: TALENT_BACKGROUND_ROWS },
+        ]
+      : [
+          {
+            title: `My Background as a ${selectedRole === "Talent" ? "Talent" : "Founder"}`,
+            rows:
+              selectedRole === "Talent"
+                ? TALENT_BACKGROUND_ROWS
+                : BACKGROUND_ROWS,
+          },
+        ];
+
+  const workTypeSummary = jobSearchProfile.workTypes
+    .map((workType) => {
+      if (workType === "Full Time") return "Full-time";
+      if (workType === "Part Time") return "part-time";
+      return workType.toLowerCase();
+    })
+    .join(" or ");
+  const jobSearchProfileSummary = [
+    jobSearchProfile.status,
+    workTypeSummary ? `${workTypeSummary} roles` : "",
+  ]
+    .filter(Boolean)
+    .join(". ");
+  const bioExperienceSummary = [
+    bioExperience.title || bioExperience.primaryRoleLabel,
+    bioExperience.yearsOfExperience
+      ? `${bioExperience.yearsOfExperience} years exp`
+      : "",
+  ]
+    .filter(Boolean)
+    .join(", ");
+  const formattedMinimumSalary = compensation.expectedMinimumSalary
+    ? Number.isNaN(Number(compensation.expectedMinimumSalary))
+      ? compensation.expectedMinimumSalary
+      : Number(compensation.expectedMinimumSalary).toLocaleString("en-US")
+    : "";
+  const compensationSalarySummary = compensation.minimumSalaryPreference
+    ?.startsWith("No")
+    ? "Flexible on salary"
+    : formattedMinimumSalary
+      ? `Ideally above (Min: ${compensation.currencyCode || "USD"} ${formattedMinimumSalary})`
+      : compensation.minimumSalaryPreference;
+  const compensationSummary = [
+    compensation.cashEquityExpectation,
+    compensationSalarySummary,
+  ]
+    .filter(Boolean)
+    .join(". ");
+  const companySizeSummary = COMPANY_SIZE_FIELDS.map((field) => {
+    const interestLabel = getCompanySizeSelectionLabel(
+      companySizeInterests[field.key],
+    );
+    return interestLabel
+      ? `${field.label.split(" (")[0]}: ${interestLabel}`
+      : "";
+  })
+    .filter(Boolean)
+    .join(", ");
+  const workAuthorizationSummary = getWorkAuthorizationLabel(workAuthorization);
+
   return (
     <View style={styles.screen}>
       <View style={styles.header}>
@@ -2288,7 +3809,12 @@ export default function ProfileEditScreen({
             onPress={() => setActiveTab(tab)}
             style={styles.modeTab}
           >
-            <Text style={[styles.modeTabText, activeTab === tab && styles.modeTabTextActive]}>
+            <Text
+              style={[
+                styles.modeTabText,
+                activeTab === tab && styles.modeTabTextActive,
+              ]}
+            >
               {tab}
             </Text>
           </Pressable>
@@ -2311,13 +3837,24 @@ export default function ProfileEditScreen({
             <Text style={styles.fieldLabel}>My Photo</Text>
             <View style={styles.photoWrap}>
               <Image
-                source={profileImageUrl ? { uri: profileImageUrl } : require("../assets/user.png")}
+                source={
+                  profileImageUrl
+                    ? { uri: profileImageUrl }
+                    : require("../assets/user.png")
+                }
                 style={styles.profilePhoto}
                 resizeMode="cover"
               />
               {editable ? (
-                <Pressable accessibilityRole="button" accessibilityLabel="Edit photo" style={styles.photoEditButton}>
-                  <Image source={require("../assets/edit.png")} style={styles.photoEditIcon} />
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Edit photo"
+                  style={styles.photoEditButton}
+                >
+                  <Image
+                    source={require("../assets/edit.png")}
+                    style={styles.photoEditIcon}
+                  />
                 </Pressable>
               ) : null}
             </View>
@@ -2352,10 +3889,20 @@ export default function ProfileEditScreen({
                 accessibilityState={{ selected: selectedRole === option.label }}
                 disabled={!editable}
                 onPress={() => setSelectedRole(option.label)}
-                style={[styles.roleOption, selectedRole === option.label && styles.roleOptionActive]}
+                style={[
+                  styles.roleOption,
+                  selectedRole === option.label && styles.roleOptionActive,
+                ]}
               >
-                {!!option.icon && <Text style={styles.roleIcon}>{option.icon}</Text>}
-                <Text style={[styles.roleLabel, selectedRole === option.label && styles.roleLabelActive]}>
+                {!!option.icon && (
+                  <Text style={styles.roleIcon}>{option.icon}</Text>
+                )}
+                <Text
+                  style={[
+                    styles.roleLabel,
+                    selectedRole === option.label && styles.roleLabelActive,
+                  ]}
+                >
                   {option.label}
                 </Text>
               </Pressable>
@@ -2384,7 +3931,9 @@ export default function ProfileEditScreen({
 
         <View style={styles.sectionBlock}>
           <Text style={styles.sectionTitle}>My Prompts</Text>
-          <Text style={styles.helperText}>Tap on tile to edit, long press to reorder</Text>
+          <Text style={styles.helperText}>
+            Tap on tile to edit, long press to reorder
+          </Text>
           {PROMPT_SLOTS.map((promptSlot, index) => (
             <Pressable
               key={promptSlot}
@@ -2395,7 +3944,9 @@ export default function ProfileEditScreen({
               style={styles.promptCard}
             >
               <Text style={styles.promptPlaceholderTitle}>
-                {promptTitles[index] || promptAnswers[index] || "Select a prompt"}
+                {promptTitles[index] ||
+                  promptAnswers[index] ||
+                  "Select a prompt"}
               </Text>
               {promptTitles[index] ? (
                 <Text style={styles.promptPlaceholderSubtitle}>
@@ -2410,60 +3961,93 @@ export default function ProfileEditScreen({
           ))}
         </View>
 
-        <View style={styles.sectionBlock}>
-          <Text style={styles.sectionTitle}>My Background as a Founder</Text>
-          {BACKGROUND_ROWS.map((row) => (
-            <DetailRow
-              key={row.title}
-              {...row}
-              value={
-                row.title === "Number of Founders"
-                  ? founderCount === 0
-                    ? "Not Selected"
-                    : String(founderCount)
-                  : row.title.startsWith("Skills & Expertise")
-                    ? skills.length
-                      ? skills
-                          .map((value) =>
-                            skillOptions.find((option) => option.value === value)?.skillName ||
-                              String(value),
-                          )
-                          .join(", ")
-                      : "Not Selected"
-                  : row.title === "Equity Split"
-                    ? equitySplitOption || "Not Selected"
-                  : row.title.startsWith("Matching Goal")
-                    ? matchingGoal
-                    : row.title.startsWith("Commitment Level")
-                      ? commitmentLevel
-                      : row.value
-              }
-              onPress={
-                row.title.startsWith("Matching Goal")
-                  ? () => setIsEditingMatchingGoal(true)
-                  : row.title.startsWith("Commitment Level")
-                    ? () => setIsEditingCommitmentLevel(true)
-                    : row.title === "Number of Founders"
-                      ? () => setIsEditingFounderCount(true)
+        {backgroundSections.map((section) => (
+          <View key={section.title} style={styles.sectionBlock}>
+            <Text style={styles.sectionTitle}>{section.title}</Text>
+            {section.rows.map((row) => (
+              <DetailRow
+                key={row.title}
+                {...row}
+                value={
+                  row.title === "Company Size"
+                    ? companySizeSummary || row.value
+                    : row.title.startsWith("Work Authorization")
+                      ? workAuthorizationSummary || row.value
+                    : row.title.startsWith("Compensation")
+                      ? compensationSummary || row.value
+                      : row.title.startsWith("Bio & Experience")
+                      ? bioExperienceSummary || row.value
+                      : row.title.startsWith("Job Search Profile")
+                        ? jobSearchProfileSummary
+                        : row.title === "Number of Founders"
+                          ? founderCount === 0
+                            ? "Not Selected"
+                            : String(founderCount)
+                          : row.title.startsWith("Skills & Expertise")
+                            ? selectedSkills.length
+                              ? selectedSkills
+                                  .map((value) => {
+                                    const foundOption = skillOptions?.find(
+                                      (option) =>
+                                        String(option.value) === String(value),
+                                    );
+                                    return foundOption?.label ?? String(value);
+                                  })
+                                  .join(", ")
+                              : initialSkills.length
+                                ? initialSkills.join(", ")
+                                : "Not Selected"
+                            : row.title === "Equity Split"
+                              ? equitySplitOption || "Not Selected"
+                              : row.title.startsWith("Matching Goal")
+                                ? matchingGoal
+                                : row.title.startsWith("Commitment Level")
+                                  ? commitmentLevel
+                                  : row.value
+                }
+                onPress={
+                  row.title === "Company Size"
+                    ? () => setIsEditingCompanySize(true)
+                    : row.title.startsWith("Work Authorization")
+                      ? () => setIsEditingWorkAuthorization(true)
+                    : row.title.startsWith("Compensation")
+                      ? () => setIsEditingCompensation(true)
+                      : row.title.startsWith("Bio & Experience")
+                      ? () => setIsEditingBioExperience(true)
+                      : row.title.startsWith("Job Search Profile")
+                        ? () => setIsEditingJobSearchProfile(true)
+                        : row.title.startsWith("Matching Goal")
+                          ? () => setIsEditingMatchingGoal(true)
+                          : row.title.startsWith("Commitment Level")
+                            ? () => setIsEditingCommitmentLevel(true)
+                            : row.title === "Number of Founders"
+                              ? () => setIsEditingFounderCount(true)
+                              : row.title.startsWith("Skills & Expertise")
+                                ? () => setIsEditingSkills(true)
+                                : row.title === "Equity Split"
+                                  ? () => setIsEditingEquitySplit(true)
+                                  : undefined
+                }
+                muted={
+                  row.title === "Company Size"
+                    ? !companySizeSummary
+                    : row.title.startsWith("Work Authorization")
+                      ? !workAuthorizationSummary
+                    : row.title.startsWith("Compensation")
+                      ? !compensationSummary
+                      : row.title === "Number of Founders"
+                      ? founderCount === 0
                       : row.title.startsWith("Skills & Expertise")
-                        ? () => setIsEditingSkills(true)
-                      : row.title === "Equity Split"
-                        ? () => setIsEditingEquitySplit(true)
-                      : undefined
-              }
-              muted={
-                row.title === "Number of Founders"
-                  ? founderCount === 0
-                  : row.title.startsWith("Skills & Expertise")
-                    ? skills.length === 0
-                    : row.title === "Equity Split"
-                      ? !equitySplitOption
-                    : row.muted
-              }
-              styles={styles}
-            />
-          ))}
-        </View>
+                        ? selectedSkills.length === 0
+                        : row.title === "Equity Split"
+                          ? !equitySplitOption
+                          : row.muted
+                }
+                styles={styles}
+              />
+            ))}
+          </View>
+        ))}
 
         <View style={styles.sectionBlock}>
           <Text style={styles.sectionTitle}>More About Me</Text>
@@ -2472,29 +4056,34 @@ export default function ProfileEditScreen({
               key={row.title}
               {...row}
               value={
-                row.title === "Industries & Interests" && selectedIndustries.length
+                row.title === "Industries & Interests" &&
+                selectedIndustries.length
                   ? selectedIndustries
-                      .map((value) =>
-                        industryOptions.find((option) => option.value === value)?.label || String(value),
+                      .map(
+                        (value) =>
+                          industryOptions.find(
+                            (option) => option.value === value,
+                          )?.label || String(value),
+                        // value.industry_name || value.label || String(value)
                       )
                       .join(", ")
                   : row.title === "Prior Startup Experience"
                     ? priorStartupExperience
-                  : row.value
+                    : row.value
               }
               muted={
                 row.title === "Industries & Interests"
                   ? selectedIndustries.length === 0
                   : row.title === "Prior Startup Experience"
                     ? !priorStartupExperience
-                  : row.muted
+                    : row.muted
               }
               onPress={
                 row.title === "Industries & Interests"
                   ? () => setIsEditingIndustries(true)
                   : row.title === "Prior Startup Experience"
                     ? () => setIsEditingPriorStartupExperience(true)
-                  : undefined
+                    : undefined
               }
               styles={styles}
             />
@@ -2503,60 +4092,55 @@ export default function ProfileEditScreen({
 
         <View style={styles.sectionBlock}>
           <Text style={styles.sectionTitle}>My Profile</Text>
-            <DetailRow
-              title="Name"
-              value={
-                profileName === null
-                  ? "Sohaib Rahman"
-                  : `${profileName.firstName} ${profileName.lastName}`.trim() ||
-                    "Not Selected"
-              }
-              onPress={() => setEditingProfileField("name")}
-              styles={styles}
-            />
-            <DetailRow
-              title="Age"
-              value={
-                dateOfBirth === undefined
-                  ? "40 years old"
-                  : dateOfBirth && calculateProfileAge(dateOfBirth) !== null
-                    ? `${calculateProfileAge(dateOfBirth)} years old`
-                    : "Not Selected"
-              }
-              onPress={() => setEditingProfileField("age")}
-              styles={styles}
-            />
-            <DetailRow
-              title="Location"
-              value={
-                profileLocation === undefined
-                  ? "Mumbai, Maharashtra, India. Remote only."
-                  : [
-                      profileLocation.city,
-                      profileLocation.workPreference,
-                      profileLocation.willingToRelocate ? "Willing to relocate" : "",
-                    ]
-                      .filter(Boolean)
-                      .join(", ") || "Not Selected"
-              }
-              onPress={() => setEditingProfileField("location")}
-              styles={styles}
-            />
-            <DetailRow
-              title="LinkedIn"
-              value={
-                linkedinUrl ??
-                "https://www.linkedin.com/in/sohaib-rahman-a5"
-              }
-              onPress={() => setEditingProfileField("linkedin")}
-              styles={styles}
-            />
-            <DetailRow
-              title="Scheduling Link"
-              value={schedulingLink ?? "Do not have a scheduling link"}
-              onPress={() => setEditingProfileField("schedulingLink")}
-              styles={styles}
-            />
+          <DetailRow
+            title="Name"
+            value={
+              profile === null
+                ? "Sohaib Rahman"
+                : `${profile.firstName} ${profile.lastName}`.trim() ||
+                  "Not Selected"
+            }
+            onPress={() => setEditingProfileField("name")}
+            styles={styles}
+          />
+          <DetailRow
+            title="Age"
+            value={
+              dateOfBirth === undefined
+                ? "NA"
+                : dateOfBirth && calculateProfileAge(dateOfBirth) !== null
+                  ? `${calculateProfileAge(dateOfBirth)} years old`
+                  : "Not Selected"
+            }
+            onPress={() => setEditingProfileField("age")}
+            styles={styles}
+          />
+
+          <DetailRow
+            title="Location"
+            value={
+              profileLocation === undefined
+                ? getLocationSummary(profile, undefined) || "Not Selected"
+                : getLocationSummary(profile, profileLocation) || "Not Selected"
+            }
+            onPress={() => setEditingProfileField("location")}
+            styles={styles}
+          />
+
+          <DetailRow
+            title="LinkedIn"
+            value={
+              linkedinUrl ?? "https://www.linkedin.com/in/sohaib-rahman-a5"
+            }
+            onPress={() => setEditingProfileField("linkedin")}
+            styles={styles}
+          />
+          <DetailRow
+            title="Scheduling Link"
+            value={schedulingLink ?? "Do not have a scheduling link"}
+            onPress={() => setEditingProfileField("schedulingLink")}
+            styles={styles}
+          />
           <ProfileHistorySection
             title="My Experiences"
             headerIcon={require("../assets/linkedin.png")}
@@ -2575,6 +4159,137 @@ export default function ProfileEditScreen({
       </ScrollView>
     </View>
   );
+}
+
+function getLocationSummary(profile, editedLocation) {
+  const locationDetails = profile?.locationDetails || {};
+
+  const city =
+    editedLocation?.city ??
+    locationDetails.selected_city ??
+    profile?.selected_city ??
+    "";
+
+  const state = locationDetails.selected_state || profile?.selected_state || "";
+  const country =
+    locationDetails.selected_country || profile?.selected_country || "";
+
+  const questions = Array.isArray(profile?.locationPreferenceQuestions)
+    ? profile.locationPreferenceQuestions
+    : [];
+
+  const savedAnswers =
+    editedLocation?.selectedAnswers !== undefined
+      ? editedLocation.selectedAnswers
+      : profile?.locationPreference;
+
+  const normalizedAnswers = Array.isArray(savedAnswers)
+    ? savedAnswers
+    : savedAnswers && typeof savedAnswers === "object"
+      ? Object.entries(savedAnswers).map(([questionId, answerId]) => ({
+          question_id: questionId,
+          selected_answer_id: answerId,
+        }))
+      : Array.isArray(profile?.locationPreference)
+        ? profile.locationPreference
+        : [];
+
+  // const savedAnswers = Array.isArray(editedLocation?.selectedAnswers)
+  //   ? Object.entries(editedLocation.selectedAnswers).map(
+  //       ([questionId, answerId]) => ({
+  //         question_id: questionId,
+  //         selected_answer_id: answerId,
+  //       }),
+  //     )
+  //   : Array.isArray(profile?.locationPreference)
+  //     ? profile.locationPreference
+  //     : [];
+
+  // Find a question by its text.
+  const findQuestion = (searchText) =>
+    questions.find((item) =>
+      item?.question?.toLowerCase().includes(searchText.toLowerCase()),
+    );
+
+  // Return the selected answer text for a question.
+  const getSelectedAnswer = (question) => {
+    if (!question) return "";
+
+    const questionId = question.question_id ?? question.id;
+
+    const savedAnswer = normalizedAnswers.find(
+      (item) => String(item.question_id) === String(questionId),
+    );
+
+    if (!savedAnswer) return "";
+
+    // Find the answer option matching the saved answer ID.
+    const answerOptions =
+      question.answers ?? question.options ?? question.answer_options ?? [];
+
+    const selectedOption = answerOptions.find(
+      (option) =>
+        String(option.answer_id ?? option.id) ===
+        String(savedAnswer.selected_answer_id),
+    );
+
+    // Return the answer's text, not the savedAnswer object.
+    return (
+      selectedOption?.answer ??
+      selectedOption?.answer_text ??
+      selectedOption?.label ??
+      selectedOption?.name ??
+      ""
+    );
+  };
+
+  const relocationQuestion = findQuestion("Are you willing to relocate");
+
+  const relocationAnswer = getSelectedAnswer(relocationQuestion);
+
+  const relocationPreference =
+    relocationAnswer.toLowerCase() === "yes"
+      ? "Willing to relocate"
+      : relocationAnswer.toLowerCase() === "no"
+        ? "Not willing to relocate"
+        : "";
+
+  // 1. Determine the work arrangement.
+  const remoteQuestion = findQuestion("Are you open to work remotely?");
+
+  const remoteAnswer = getSelectedAnswer(remoteQuestion);
+
+  let workArrangement = "";
+  if (remoteAnswer.toLowerCase() === "no") {
+    workArrangement = "On-site";
+  } else if (remoteAnswer.toLowerCase() === "yes") {
+    workArrangement = "Remote";
+  }
+
+  // 2. Determine the preferred remote-work arrangement.
+  const preferenceQuestion = findQuestion(
+    "What is your preference in working remotely",
+  );
+
+  const workPreference = getSelectedAnswer(preferenceQuestion);
+
+  // setProfileLocation({
+  //   ...profileLocation,
+  //   willingToRelocate: relocationPreference,
+  //   openToRemote: workArrangement,
+  //   workPreference: workPreference,
+  // });
+
+  // Build the location summary.
+  const summaryParts = [
+    city,
+    country,
+    workArrangement,
+    workPreference,
+    relocationPreference,
+  ].filter(Boolean);
+
+  return summaryParts.join(" · ");
 }
 
 function createStyles(metrics) {
@@ -2601,6 +4316,375 @@ function createStyles(metrics) {
       justifyContent: "space-between",
     },
     headlineBackIcon: { width: scale(34), height: scale(34) },
+    jobSearchHeader: {
+      minHeight: scale(72),
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      paddingHorizontal: metrics.vw(5),
+    },
+    jobSearchHeaderAction: {
+      width: scale(34),
+      minHeight: scale(44),
+      justifyContent: "center",
+    },
+    jobSearchHeaderTitle: {
+      flex: 1,
+      color: "#080808",
+      fontSize: scale(25),
+      fontWeight: "700",
+      textAlign: "center",
+    },
+    jobSearchContent: {
+      flexGrow: 1,
+      paddingHorizontal: metrics.vw(5.8),
+      paddingBottom: scale(32),
+    },
+    jobSearchQuestion: {
+      color: "#7d879e",
+      fontSize: scale(18),
+      lineHeight: scale(26),
+      marginTop: scale(22),
+    },
+    jobSearchStatusOptions: {
+      marginTop: scale(31),
+      gap: scale(26),
+    },
+    jobSearchStatusOption: {
+      minHeight: scale(35),
+      flexDirection: "row",
+      alignItems: "center",
+    },
+    jobSearchRadio: {
+      width: scale(30),
+      height: scale(30),
+      borderWidth: scale(2.5),
+      borderColor: "#7d879e",
+      borderRadius: scale(15),
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    jobSearchRadioSelected: { borderColor: "#08a9b8" },
+    jobSearchRadioDot: {
+      width: scale(18),
+      height: scale(18),
+      borderRadius: scale(9),
+      backgroundColor: "#08a9b8",
+    },
+    jobSearchOptionText: {
+      color: "#595959",
+      fontSize: scale(18),
+      marginLeft: scale(15),
+    },
+    jobSearchWorkQuestion: {
+      color: "#7d879e",
+      fontSize: scale(18),
+      lineHeight: scale(26),
+      marginTop: scale(62),
+      marginHorizontal: scale(9),
+    },
+    jobSearchWorkTypes: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      columnGap: scale(24),
+      rowGap: scale(28),
+      marginTop: scale(22),
+    },
+    jobSearchWorkType: {
+      width: "39%",
+      minHeight: scale(54),
+      alignItems: "center",
+      justifyContent: "center",
+      borderRadius: scale(28),
+      backgroundColor: "#dfe2e7",
+      borderWidth: scale(1.5),
+      borderColor: "transparent",
+    },
+    jobSearchInternship: { width: "48%" },
+    jobSearchWorkTypeSelected: {
+      backgroundColor: "#2dbcc4",
+      borderColor: "#bcebed",
+    },
+    jobSearchWorkTypeText: {
+      color: "#7d879e",
+      fontSize: scale(18),
+    },
+    jobSearchWorkTypeTextSelected: { color: "#fff" },
+    jobSearchFounderOption: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      marginTop: scale(48),
+      paddingHorizontal: scale(4),
+    },
+    jobSearchCheckbox: {
+      width: scale(36),
+      height: scale(36),
+      borderWidth: scale(2),
+      borderColor: "#7d879e",
+      borderRadius: scale(6),
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    jobSearchCheckboxSelected: {
+      backgroundColor: "#2dbcc4",
+      borderColor: "#2dbcc4",
+    },
+    jobSearchCheckboxCheck: {
+      color: "#fff",
+      fontSize: scale(27),
+      fontWeight: "700",
+      lineHeight: scale(30),
+    },
+    jobSearchFounderOptionText: {
+      flex: 1,
+      color: "#7d879e",
+      fontSize: scale(18),
+      lineHeight: scale(26),
+      marginLeft: scale(16),
+    },
+    bioExperienceHeader: {
+      minHeight: scale(72),
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      paddingHorizontal: metrics.vw(5),
+    },
+    bioExperienceHeaderAction: {
+      width: scale(34),
+      minHeight: scale(44),
+      justifyContent: "center",
+    },
+    bioExperienceHeaderTitle: {
+      flex: 1,
+      color: "#080808",
+      fontSize: scale(25),
+      fontWeight: "700",
+      textAlign: "center",
+    },
+    bioExperienceDoneButton: {
+      width: scale(58),
+      minHeight: scale(44),
+      justifyContent: "center",
+      alignItems: "flex-end",
+    },
+    bioExperienceDoneText: {
+      color: "#62b8b7",
+      fontSize: scale(22),
+    },
+    bioExperienceContent: {
+      flexGrow: 1,
+      paddingHorizontal: metrics.vw(5.8),
+      paddingTop: scale(10),
+      paddingBottom: scale(36),
+    },
+    bioExperienceFieldRow: {
+      minHeight: scale(52),
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      borderBottomWidth: scale(2),
+      borderBottomColor: "#d7d4ce",
+      marginBottom: scale(46),
+      paddingHorizontal: scale(4),
+    },
+    bioExperiencePrimaryRoleRow: { marginBottom: scale(62) },
+    bioExperienceSecondaryRoleRow: { marginBottom: scale(51) },
+    bioExperienceFieldText: {
+      flex: 1,
+      color: "#333",
+      fontSize: scale(18),
+      lineHeight: scale(25),
+    },
+    bioExperiencePlaceholder: { color: "#a2a2a2" },
+    bioExperienceChevron: {
+      color: "#9b9b9b",
+      fontSize: scale(18),
+      marginLeft: scale(12),
+    },
+    bioExperienceTextInput: {
+      minHeight: scale(52),
+      borderBottomWidth: scale(2),
+      borderBottomColor: "#d7d4ce",
+      color: "#333",
+      fontSize: scale(18),
+      lineHeight: scale(25),
+      paddingHorizontal: scale(4),
+      paddingVertical: scale(10),
+      marginBottom: scale(46),
+    },
+    bioExperienceLongInput: {
+      minHeight: scale(148),
+      paddingTop: scale(24),
+      marginBottom: scale(42),
+      textAlignVertical: "top",
+    },
+    bioExperienceDateField: {
+      minHeight: scale(40),
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      borderBottomWidth: scale(2),
+      borderBottomColor: "#d7d4ce",
+      paddingHorizontal: scale(8),
+      marginBottom: scale(28),
+    },
+    bioExperienceDisabledDateField: { opacity: 0.55 },
+    bioExperienceWebDateField: {
+      minHeight: scale(40),
+      flexDirection: "row",
+      alignItems: "center",
+      borderBottomWidth: scale(2),
+      borderBottomColor: "#d7d4ce",
+      paddingHorizontal: scale(8),
+      marginBottom: scale(28),
+    },
+    bioExperienceWebDateInput: {
+      position: "absolute",
+      top: 0,
+      right: 0,
+      bottom: 0,
+      left: 0,
+      width: "100%",
+      height: "100%",
+      borderWidth: 0,
+      backgroundColor: "transparent",
+      color: "transparent",
+      fontFamily: "inherit",
+      fontSize: scale(18),
+      padding: 0,
+    },
+    bioExperienceWebDateLabel: {
+      color: "#a2a2a2",
+      fontSize: scale(18),
+      paddingHorizontal: scale(4),
+    },
+    bioExperienceCalendarIcon: {
+      width: scale(32),
+      height: scale(29),
+      borderWidth: scale(2),
+      borderColor: "#2dbcc4",
+      borderRadius: scale(4),
+      marginLeft: scale(10),
+      paddingTop: scale(8),
+      paddingHorizontal: scale(4),
+    },
+    bioExperienceCalendarTop: {
+      position: "absolute",
+      top: 0,
+      left: 0,
+      right: 0,
+      height: scale(6),
+      backgroundColor: "#2dbcc4",
+      borderTopLeftRadius: scale(2),
+      borderTopRightRadius: scale(2),
+    },
+    bioExperienceCalendarGrid: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      justifyContent: "space-between",
+      rowGap: scale(3),
+    },
+    bioExperienceCalendarDot: {
+      width: scale(4),
+      height: scale(3),
+      borderRadius: scale(1),
+      backgroundColor: "#2dbcc4",
+    },
+    bioExperienceCurrentRow: {
+      minHeight: scale(48),
+      flexDirection: "row",
+      alignItems: "center",
+      paddingHorizontal: scale(8),
+      marginBottom: scale(27),
+    },
+    bioExperienceCheckbox: {
+      width: scale(28),
+      height: scale(28),
+      borderWidth: scale(2),
+      borderColor: "#62b8b7",
+      borderRadius: scale(4),
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    bioExperienceCheckboxSelected: {
+      backgroundColor: "#2dbcc4",
+      borderColor: "#2dbcc4",
+    },
+    bioExperienceCheckboxCheck: {
+      color: "#fff",
+      fontSize: scale(22),
+      fontWeight: "700",
+      lineHeight: scale(24),
+    },
+    bioExperienceCurrentText: {
+      color: "#a2a2a2",
+      fontSize: scale(18),
+      marginLeft: scale(14),
+    },
+    bioExperienceModalBackdrop: {
+      flex: 1,
+      backgroundColor: "rgba(0, 0, 0, 0.34)",
+      justifyContent: "center",
+      paddingHorizontal: metrics.vw(6),
+    },
+    bioExperienceModalCard: {
+      maxHeight: metrics.vh(62),
+      borderRadius: scale(20),
+      backgroundColor: "#fff",
+      paddingHorizontal: metrics.vw(5),
+      paddingTop: metrics.vh(2.4),
+      paddingBottom: metrics.vh(2),
+    },
+    bioExperienceModalTitle: {
+      color: "#101010",
+      fontSize: scale(20),
+      fontWeight: "700",
+      marginBottom: metrics.vh(1.4),
+    },
+    bioExperienceModalList: { maxHeight: metrics.vh(44) },
+    bioExperienceModalOption: {
+      paddingVertical: metrics.vh(1.2),
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: "#ececec",
+    },
+    bioExperienceModalOptionText: {
+      color: "#1f1f1f",
+      fontSize: scale(17),
+      fontWeight: "600",
+    },
+    bioExperienceModalDescription: {
+      color: "#707070",
+      fontSize: scale(14),
+      marginTop: scale(4),
+    },
+    bioExperienceModalError: {
+      color: "#c44f4f",
+      fontSize: scale(16),
+      marginBottom: scale(10),
+    },
+    bioExperienceRetry: {
+      color: "#2dbcc4",
+      fontSize: scale(16),
+      fontWeight: "600",
+    },
+    bioExperienceDateModalCard: {
+      borderRadius: scale(20),
+      backgroundColor: "#fff",
+      padding: scale(20),
+    },
+    bioExperienceIosDatePicker: { alignSelf: "center" },
+    bioExperienceDateActions: {
+      flexDirection: "row",
+      justifyContent: "flex-end",
+      gap: scale(20),
+      marginTop: scale(12),
+    },
+    bioExperienceDateAction: { paddingVertical: scale(10) },
+    bioExperienceDateActionText: {
+      color: "#2dbcc4",
+      fontSize: scale(16),
+      fontWeight: "600",
+    },
     headlineDoneAction: {
       width: scale(58),
       minHeight: scale(44),
@@ -2627,7 +4711,11 @@ function createStyles(metrics) {
     scroll: { flex: 1 },
     scrollArea: { flex: 1 },
     content: { paddingHorizontal: metrics.vw(3.8), paddingBottom: scale(20) },
-    photoHeadlineRow: { flexDirection: "row", gap: scale(14), alignItems: "flex-end" },
+    photoHeadlineRow: {
+      flexDirection: "row",
+      gap: scale(14),
+      alignItems: "flex-end",
+    },
     photoColumn: { width: metrics.vw(29) },
     headlineColumn: { flex: 1, minWidth: 0 },
     fieldLabel: {
@@ -2649,7 +4737,11 @@ function createStyles(metrics) {
       alignItems: "center",
       justifyContent: "center",
     },
-    photoEditIcon: { width: scale(21), height: scale(21), resizeMode: "contain" },
+    photoEditIcon: {
+      width: scale(21),
+      height: scale(21),
+      resizeMode: "contain",
+    },
     headlineInput: {
       minHeight: scale(112),
       borderWidth: scale(1.5),
@@ -2820,6 +4912,36 @@ function createStyles(metrics) {
     profileLinkedinPreviewText: {
       color: "#a2a2a2",
       fontSize: scale(17),
+    },
+    profileFieldRow: {
+      marginBottom: 16,
+    },
+
+    profileFieldLabel: {
+      fontSize: 14,
+      fontWeight: "500",
+      color: "#333333",
+      marginBottom: 8,
+    },
+
+    profileDateInput: {
+      minHeight: 48,
+      borderWidth: 1,
+      borderColor: "#D9D9D9",
+      borderRadius: 8,
+      paddingHorizontal: 12,
+      paddingVertical: 12,
+      backgroundColor: "#FFFFFF",
+      justifyContent: "center",
+    },
+
+    profileDateText: {
+      fontSize: 16,
+      color: "#222222",
+    },
+
+    profileFieldPlaceholder: {
+      color: "#999999",
     },
     ideaEditorContent: {
       flex: 1,
@@ -3018,20 +5140,30 @@ function createStyles(metrics) {
       marginBottom: scale(52),
     },
     skillsOptions: {
+      // flexDirection: "row",
+      // flexWrap: "wrap",
+      // alignItems: "center",
+      // columnGap: scale(20),
+      // rowGap: scale(36),
       flexDirection: "row",
       flexWrap: "wrap",
-      alignItems: "center",
-      justifyContent: "center",
-      columnGap: scale(20),
-      rowGap: scale(36),
+      justifyContent: "space-between",
+      rowGap: scale(18),
     },
     skillsOption: {
-      minHeight: scale(52),
-      minWidth: scale(120),
-      paddingHorizontal: scale(24),
+      // minHeight: scale(52),
+      // minWidth: scale(120),
+      // paddingHorizontal: scale(24),
+      // alignItems: "center",
+      // justifyContent: "center",
+      // borderRadius: scale(28),
+      // backgroundColor: "#dfe2e8",
+      width: "48%",
+      minHeight: scale(46),
+      paddingHorizontal: scale(15),
+      borderRadius: scale(28),
       alignItems: "center",
       justifyContent: "center",
-      borderRadius: scale(28),
       backgroundColor: "#dfe2e8",
     },
     skillsOptionSelected: {

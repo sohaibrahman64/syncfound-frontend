@@ -15,6 +15,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useResponsiveMetrics } from "../utils/responsive";
 import { BASE_URL_NO_API } from "../utils/Constants";
 import { getMyProfile } from "../utils/backendAuth";
+import { withPlatformFontStyles } from "../utils/typography";
+import ProfileEditScreen from "./ProfileEditScreen";
 
 const TAB_ITEMS = [
   { key: "invites", label: "Invites", icon: require("../assets/invites-inactive.png") },
@@ -72,6 +74,7 @@ export default function ProfileScreen({
   const [profile, setProfile] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
+  const [isEditingProfile, setIsEditingProfile] = useState(false);
 
   const loadProfile = async () => {
     setIsLoading(true);
@@ -102,12 +105,30 @@ export default function ProfileScreen({
   ).trim();
   const profileImageUrl = resolveProfileImageUrl(profile?.profileImageUri);
   const linkedinUrl = resolveLinkedinUrl(profile?.linkedinUrl);
-  const startupSummary = String(
-    profile?.startupIdea || profile?.bio || profile?.title || "",
+  const dateOfBirth = String(
+    profile?.dateOfBirth ||
+      profile?.date_of_birth ||
+      profile?.dob ||
+      profile?.birth_date ||
+      "",
+  ).trim();
+  const bioSummary = String(
+    profile?.bio || profile?.title || "",
   ).trim();
 
   return (
     <View style={styles.screen}>
+      {isEditingProfile ? (
+        <ProfileEditScreen
+          profile={profile}
+          profileImageUrl={profileImageUrl}
+          firebaseToken={firebaseToken}
+          initialDateOfBirth={dateOfBirth}
+          onClose={() => setIsEditingProfile(false)}
+          onSave={() => setIsEditingProfile(false)}
+        />
+      ) : (
+        <>
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Profile</Text>
         <Pressable
@@ -116,7 +137,11 @@ export default function ProfileScreen({
           hitSlop={10}
           style={styles.settingsButton}
         >
-          <Text style={styles.settingsGlyph}>⚙</Text>
+          <Image
+            source={require("../assets/profile_settings.png")}
+            style={styles.settingsIcon}
+            resizeMode="contain"
+          />
         </Pressable>
       </View>
 
@@ -189,9 +214,9 @@ export default function ProfileScreen({
             </View>
           </View>
 
-          {!!startupSummary && (
+          {!!bioSummary && (
             <Text style={styles.summary}>
-              {`Founder ${startupSummary}`}
+              {`${bioSummary}`}
             </Text>
           )}
 
@@ -200,6 +225,7 @@ export default function ProfileScreen({
               icon={require("../assets/edit_profile.png")}
               title="Edit Profile"
               subtitle="How do you want your profile to be seen?"
+              onPress={() => setIsEditingProfile(true)}
               styles={styles}
             />
             <ProfileAction
@@ -211,11 +237,11 @@ export default function ProfileScreen({
           </View>
 
           <ImageBackground
-            source={require("../assets/cofounders.jpg")}
+            source={require("../assets/invites_cover.png")}
             imageStyle={styles.inviteImage}
             style={styles.inviteBanner}
           >
-            <View style={styles.inviteScrim} />
+            {/* <View style={styles.inviteScrim} /> */}
             <Text style={styles.inviteTitle}>SyncFound</Text>
             <Text style={styles.inviteSubtitle}>Invite your friends to SyncFound</Text>
             <Pressable
@@ -248,6 +274,8 @@ export default function ProfileScreen({
           </Pressable>
         </ScrollView>
       )}
+        </>
+      )}
 
       <View style={styles.bottomTabBar}>
         {TAB_ITEMS.map((item) => {
@@ -274,7 +302,7 @@ export default function ProfileScreen({
 
 function createStyles(metrics, insets) {
   const scale = metrics.moderateScale;
-  return {
+  return withPlatformFontStyles({
     screen: {
       flex: 1,
       paddingTop: insets.top,
@@ -282,7 +310,8 @@ function createStyles(metrics, insets) {
     },
     header: {
       minHeight: scale(68),
-      paddingHorizontal: metrics.vw(7.5),
+      paddingLeft: metrics.vw(7.5),
+      paddingRight: metrics.vw(5.5),
       flexDirection: "row",
       alignItems: "center",
       justifyContent: "space-between",
@@ -293,16 +322,12 @@ function createStyles(metrics, insets) {
       fontWeight: "700",
     },
     settingsButton: {
-      width: scale(42),
+      width: scale(32),
       height: scale(42),
       alignItems: "center",
       justifyContent: "center",
     },
-    settingsGlyph: {
-      color: "#7e879d",
-      fontSize: scale(34),
-      lineHeight: scale(40),
-    },
+    settingsIcon: { width: scale(32), height: scale(32) },
     scroll: { flex: 1 },
     content: {
       paddingHorizontal: metrics.vw(5.5),
@@ -429,7 +454,7 @@ function createStyles(metrics, insets) {
     inviteImage: { borderRadius: scale(18) },
     inviteScrim: {
       ...StyleSheet.absoluteFillObject,
-      backgroundColor: "rgba(0,0,0,0.58)",
+      backgroundColor: "rgba(0,0,0,0.22)",
     },
     inviteTitle: { color: "#fff", fontSize: scale(30), fontWeight: "600" },
     inviteSubtitle: {
@@ -492,5 +517,5 @@ function createStyles(metrics, insets) {
     tabIcon: { width: scale(38), height: scale(38) },
     tabLabel: { color: "#aaa", fontSize: scale(16) },
     tabLabelActive: { color: "#12b7c2" },
-  };
+  });
 }

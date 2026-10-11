@@ -185,6 +185,30 @@ describe('HomeScreen — swipe monetization', () => {
     expect(getMyProfile).toHaveBeenCalledWith('test-token');
   });
 
+  it('opens the hardcoded profile editor without making another profile request', async () => {
+    getMyProfile.mockResolvedValue({
+      firstName: 'Sohaib',
+      lastName: 'Rahman',
+      profileImageUri: '/uploads/images/profile.jpg',
+    });
+
+    const { getByText, findByText, getByLabelText } = renderHomeScreen();
+    fireEvent.press(getByText('Profile'));
+    await findByText('Sohaib Rahman');
+    const profileRequestCount = getMyProfile.mock.calls.length;
+
+    fireEvent.press(getByText('Edit Profile'));
+
+    expect(await findByText('What Best Describes Me')).toBeTruthy();
+    expect(getByLabelText('My Headline')).toBeTruthy();
+    expect(getByText('My Background as a Founder')).toBeTruthy();
+    expect(getByText('LinkedIn')).toBeTruthy();
+    expect(getByText('Scheduling Link')).toBeTruthy();
+    expect(getByText('My Experiences')).toBeTruthy();
+    expect(getByText('My Education')).toBeTruthy();
+    expect(getMyProfile).toHaveBeenCalledTimes(profileRequestCount);
+  });
+
   it('prefixes relative match photo paths with the BASE_URL origin only', () => {
     const { resolveProfilePhotoUrl } = require('../screens/HomeScreen');
 
