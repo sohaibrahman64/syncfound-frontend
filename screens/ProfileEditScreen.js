@@ -1,4 +1,10 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import DateTimePicker, {
   DateTimePickerAndroid,
 } from "@react-native-community/datetimepicker";
@@ -676,6 +682,7 @@ function BioExperiencePickerField({
 
   return (
     <View>
+      <Text style={styles.bioExperienceInputLabel}>{label}</Text>
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={label}
@@ -748,6 +755,23 @@ function BioExperiencePickerField({
           </Pressable>
         </Pressable>
       </Modal>
+    </View>
+  );
+}
+
+function BioExperienceTextField({
+  label,
+  styles,
+  fieldStyle,
+  ...inputProps
+}) {
+  return (
+    <View style={[styles.bioExperienceTextField, fieldStyle]}>
+      <Text style={styles.bioExperienceInputLabel}>{label}</Text>
+      <TextInput
+        {...inputProps}
+        style={styles.bioExperienceTextInput}
+      />
     </View>
   );
 }
@@ -911,72 +935,78 @@ function BioExperienceProfileEditScreen({
     if (Platform.OS === "web") {
       const dateValue = value ? String(value).slice(0, 10) : "";
       return (
-        <View
+        <View>
+          <Text style={styles.bioExperienceInputLabel}>{label}</Text>
+          <View
+            style={[
+              styles.bioExperienceWebDateField,
+              target === "endDate" &&
+                form.currentlyWorkHere &&
+                styles.bioExperienceDisabledDateField,
+            ]}
+          >
+            <Text
+              pointerEvents="none"
+              style={[
+                styles.bioExperienceWebDateLabel,
+                !dateText && styles.bioExperiencePlaceholder,
+              ]}
+            >
+              {dateText || label}
+            </Text>
+            <input
+              aria-label={label}
+              type="date"
+              value={dateValue}
+              max={new Date().toISOString().slice(0, 10)}
+              min={target === "endDate" && parsedStartDate
+                ? parsedStartDate.toISOString().slice(0, 10)
+                : undefined}
+              disabled={target === "endDate" && form.currentlyWorkHere}
+              onChange={(event) => {
+                const nextValue = event.target.value;
+                if (!nextValue) {
+                  updateField(target, "");
+                  return;
+                }
+                const nextDate = new Date(`${nextValue}T12:00:00`);
+                if (!Number.isNaN(nextDate.getTime())) {
+                  setDateField(target, nextDate);
+                }
+              }}
+              style={styles.bioExperienceWebDateInput}
+            />
+          </View>
+        </View>
+      );
+    }
+
+    return (
+      <View>
+        <Text style={styles.bioExperienceInputLabel}>{label}</Text>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={label}
+          onPress={() => openDatePicker(target)}
+          disabled={target === "endDate" && form.currentlyWorkHere}
           style={[
-            styles.bioExperienceWebDateField,
+            styles.bioExperienceDateField,
             target === "endDate" &&
               form.currentlyWorkHere &&
               styles.bioExperienceDisabledDateField,
           ]}
         >
           <Text
-            pointerEvents="none"
             style={[
-              styles.bioExperienceWebDateLabel,
+              styles.bioExperienceFieldText,
               !dateText && styles.bioExperiencePlaceholder,
             ]}
           >
             {dateText || label}
           </Text>
-          <input
-            aria-label={label}
-            type="date"
-            value={dateValue}
-            max={new Date().toISOString().slice(0, 10)}
-            min={target === "endDate" && parsedStartDate
-              ? parsedStartDate.toISOString().slice(0, 10)
-              : undefined}
-            disabled={target === "endDate" && form.currentlyWorkHere}
-            onChange={(event) => {
-              const nextValue = event.target.value;
-              if (!nextValue) {
-                updateField(target, "");
-                return;
-              }
-              const nextDate = new Date(`${nextValue}T12:00:00`);
-              if (!Number.isNaN(nextDate.getTime())) {
-                setDateField(target, nextDate);
-              }
-            }}
-            style={styles.bioExperienceWebDateInput}
-          />
-        </View>
-      );
-    }
-
-    return (
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={label}
-        onPress={() => openDatePicker(target)}
-        disabled={target === "endDate" && form.currentlyWorkHere}
-        style={[
-          styles.bioExperienceDateField,
-          target === "endDate" &&
-            form.currentlyWorkHere &&
-            styles.bioExperienceDisabledDateField,
-        ]}
-      >
-        <Text
-          style={[
-            styles.bioExperienceFieldText,
-            !dateText && styles.bioExperiencePlaceholder,
-          ]}
-        >
-          {dateText || label}
-        </Text>
-        <BioExperienceCalendarIcon styles={styles} />
-      </Pressable>
+          <BioExperienceCalendarIcon styles={styles} />
+        </Pressable>
+      </View>
     );
   }
 
@@ -1093,9 +1123,10 @@ function BioExperienceProfileEditScreen({
           styles={styles}
         />
 
-        <TextInput
+        <BioExperienceTextField
+          label="Company Name"
+          styles={styles}
           accessibilityLabel="Company Name"
-          style={styles.bioExperienceTextInput}
           value={form.companyName}
           onChangeText={(value) => updateField("companyName", value)}
           placeholder="Company Name"
@@ -1103,9 +1134,10 @@ function BioExperienceProfileEditScreen({
           autoCapitalize="words"
           autoCorrect={false}
         />
-        <TextInput
+        <BioExperienceTextField
+          label="Location"
+          styles={styles}
           accessibilityLabel="Location"
-          style={styles.bioExperienceTextInput}
           value={form.location}
           onChangeText={(value) => updateField("location", value)}
           placeholder="Location"
@@ -1162,9 +1194,10 @@ function BioExperienceProfileEditScreen({
         </Pressable>
         {renderDateField("endDate", "End Date")}
 
-        <TextInput
+        <BioExperienceTextField
+          label="Title"
+          styles={styles}
           accessibilityLabel="Title"
-          style={styles.bioExperienceTextInput}
           value={form.title}
           onChangeText={(value) => updateField("title", value)}
           placeholder="Title"
@@ -1197,9 +1230,10 @@ function BioExperienceProfileEditScreen({
           fieldStyle={styles.bioExperiencePrimaryRoleRow}
           styles={styles}
         />
-        <TextInput
+        <BioExperienceTextField
+          label="Years Of Experience"
+          styles={styles}
           accessibilityLabel="Years Of Experience"
-          style={styles.bioExperienceTextInput}
           value={form.yearsOfExperience}
           onChangeText={(value) => updateField("yearsOfExperience", value)}
           placeholder="Years Of Experience"
@@ -1228,9 +1262,11 @@ function BioExperienceProfileEditScreen({
           fieldStyle={styles.bioExperienceSecondaryRoleRow}
           styles={styles}
         />
-        <TextInput
+        <BioExperienceTextField
+          label="Bio"
+          styles={styles}
           accessibilityLabel="Bio"
-          style={[styles.bioExperienceTextInput, styles.bioExperienceLongInput]}
+          fieldStyle={styles.bioExperienceLongInput}
           value={form.bio}
           onChangeText={(value) => updateField("bio", value)}
           placeholder="Bio"
@@ -1240,9 +1276,11 @@ function BioExperienceProfileEditScreen({
           multiline
           textAlignVertical="top"
         />
-        <TextInput
+        <BioExperienceTextField
+          label="Startup Idea"
+          styles={styles}
           accessibilityLabel="Startup Idea"
-          style={[styles.bioExperienceTextInput, styles.bioExperienceLongInput]}
+          fieldStyle={styles.bioExperienceLongInput}
           value={form.startupIdea}
           onChangeText={(value) => updateField("startupIdea", value)}
           placeholder="Startup Idea"
@@ -1592,7 +1630,102 @@ function LocationProfileEditScreen({
 
 function LinkedinProfileEditScreen({ initialUrl, onDone, metrics }) {
   const styles = createStyles(metrics);
-  const [linkedinUrl, setLinkedinUrl] = useState(initialUrl);
+  const [linkedinUrl, setLinkedinUrl] = useState(initialUrl || "");
+  const [linkedinPreview, setLinkedinPreview] = useState(null);
+  const [isPreviewLoading, setIsPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState("");
+
+  const loadLinkedinPreview = useCallback(async (url) => {
+    const normalizedUrl = url
+      .trim()
+      .replace(/^https?:\/\//i, "")
+      .replace(/^www\./i, "");
+    const profilePath = "linkedin.com/in/";
+    const profilePathIndex = normalizedUrl
+      .toLowerCase()
+      .indexOf(profilePath);
+    const username = (
+      profilePathIndex >= 0
+        ? normalizedUrl.slice(profilePathIndex + profilePath.length)
+        : normalizedUrl.replace(/^\/+/, "")
+    )
+      .split(/[/?#]/)[0]
+      .trim();
+
+    if (!username) {
+      setLinkedinPreview(null);
+      setPreviewError("Enter a LinkedIn profile URL to preview.");
+      return;
+    }
+
+    setIsPreviewLoading(true);
+    setPreviewError("");
+
+    try {
+      const response = await apiFetch(
+        `/linkedin-profile?username=${encodeURIComponent(username)}`,
+        {
+          method: "GET",
+          headers: { Accept: "application/json" },
+        },
+      );
+      const payload = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          payload?.detail ||
+            payload?.message ||
+            "Failed to fetch LinkedIn profile.",
+        );
+      }
+
+      const basicInfo = payload?.basic_info ?? {};
+      const firstExperience = payload?.experience?.[0] ?? {};
+      const firstEducation = payload?.education?.[0] ?? {};
+      const connectionCount = Number(basicInfo.connection_count);
+      const preview = {
+        headline: String(basicInfo.headline ?? "").trim(),
+        firstOrganization: String(firstExperience.company ?? "").trim(),
+        firstEducationInstitution: String(firstEducation.school ?? "").trim(),
+        firstLocation: String(
+          basicInfo.location?.full || basicInfo.location?.city || "",
+        ).trim(),
+        connections:
+          Number.isFinite(connectionCount) && connectionCount >= 0
+            ? `${connectionCount} connections on LinkedIn`
+            : "",
+      };
+
+      if (
+        !preview.headline ||
+        !preview.firstOrganization ||
+        !preview.firstEducationInstitution ||
+        !preview.firstLocation ||
+        !preview.connections
+      ) {
+        setLinkedinPreview(null);
+        setPreviewError(
+          "Could not build profile preview. Please check the URL and try again.",
+        );
+        return;
+      }
+
+      setLinkedinPreview(preview);
+    } catch (error) {
+      setLinkedinPreview(null);
+      setPreviewError(
+        error?.message || "Failed to fetch LinkedIn profile preview.",
+      );
+    } finally {
+      setIsPreviewLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (initialUrl?.trim()) {
+      void loadLinkedinPreview(initialUrl);
+    }
+  }, [initialUrl, loadLinkedinPreview]);
 
   return (
     <View style={styles.screen}>
@@ -1603,22 +1736,72 @@ function LinkedinProfileEditScreen({ initialUrl, onDone, metrics }) {
         styles={styles}
       />
       <View style={styles.profileFieldContent}>
-        <TextInput
-          accessibilityLabel="LinkedIn profile URL"
-          value={linkedinUrl}
-          onChangeText={setLinkedinUrl}
-          placeholder="linkedin.com/in/your-profile"
-          placeholderTextColor="#a2a2a2"
-          autoCapitalize="none"
-          autoCorrect={false}
-          keyboardType="url"
-          style={styles.profileUnderlineInput}
-        />
-        <View style={styles.profileLinkedinPreview}>
-          <Text style={styles.profileLinkedinPreviewText}>
-            LinkedIn Profile Preview
-          </Text>
+        <View style={styles.profileLinkedinInputRow}>
+          <TextInput
+            accessibilityLabel="LinkedIn profile URL"
+            value={linkedinUrl}
+            onChangeText={(value) => {
+              setLinkedinUrl(value);
+              setLinkedinPreview(null);
+              setPreviewError("");
+            }}
+            placeholder="linkedin.com/in/your-profile"
+            placeholderTextColor="#a2a2a2"
+            autoCapitalize="none"
+            autoCorrect={false}
+            keyboardType="url"
+            style={[styles.profileUnderlineInput, styles.profileLinkedinUrlInput]}
+          />
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Load LinkedIn profile preview"
+            accessibilityState={{ disabled: isPreviewLoading }}
+            disabled={isPreviewLoading}
+            onPress={() => void loadLinkedinPreview(linkedinUrl)}
+            style={styles.profileLinkedinPreviewButton}
+          >
+            {isPreviewLoading ? (
+              <ActivityIndicator color="#20b8c2" />
+            ) : (
+              <Image
+                source={require("../assets/right-arrow.png")}
+                style={styles.profileLinkedinPreviewArrow}
+                resizeMode="contain"
+              />
+            )}
+          </Pressable>
         </View>
+        <View
+          accessibilityLabel="LinkedIn Profile Preview"
+          style={[
+            styles.profileLinkedinPreview,
+            linkedinPreview && styles.profileLinkedinPreviewFilled,
+          ]}
+        >
+          {isPreviewLoading ? (
+            <Text style={styles.profileLinkedinPreviewText}>
+              Loading LinkedIn Profile...
+            </Text>
+          ) : linkedinPreview ? (
+            <View style={styles.profileLinkedinPreviewDetails}>
+              <Text style={styles.profileLinkedinPreviewHeadline}>
+                {linkedinPreview.headline}
+              </Text>
+              <Text style={styles.profileLinkedinPreviewMeta}>
+                {`${linkedinPreview.firstOrganization} • ${linkedinPreview.firstEducationInstitution} • ${linkedinPreview.firstLocation} • ${linkedinPreview.connections}`}
+              </Text>
+            </View>
+          ) : (
+            <Text style={styles.profileLinkedinPreviewText}>
+              LinkedIn Profile Preview
+            </Text>
+          )}
+        </View>
+        {previewError ? (
+          <Text accessibilityRole="alert" style={styles.profileLinkedinPreviewError}>
+            {previewError}
+          </Text>
+        ) : null}
         <Text style={styles.profileFieldNote}>
           Your LinkedIn profile must be public for preview to appear.
         </Text>
@@ -1656,7 +1839,15 @@ function SchedulingLinkEditScreen({ initialUrl, onDone, metrics }) {
   );
 }
 
-function ProfileHistorySection({ title, headerIcon, itemIcon, items, styles }) {
+function ProfileHistorySection({
+  title,
+  headerIcon,
+  itemIcon,
+  items,
+  onAdd,
+  onItemPress,
+  styles,
+}) {
   return (
     <View style={styles.historySection}>
       <View style={styles.historyHeader}>
@@ -1667,12 +1858,24 @@ function ProfileHistorySection({ title, headerIcon, itemIcon, items, styles }) {
             style={styles.historyHeaderIcon}
             resizeMode="contain"
           />
-          <Text style={styles.addIcon}>+</Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Add ${title === "My Experiences" ? "experience" : "education"}`}
+            disabled={!onAdd}
+            onPress={onAdd}
+            style={styles.historyAddButton}
+          >
+            <Text style={styles.addIcon}>+</Text>
+          </Pressable>
         </View>
       </View>
-      {items.map((item) => (
-        <View
-          key={`${item.title}-${item.organization}`}
+      {items.map((item, index) => (
+        <Pressable
+          accessibilityRole={onItemPress ? "button" : undefined}
+          accessibilityLabel={onItemPress ? `Edit ${item.title}` : undefined}
+          disabled={!onItemPress}
+          onPress={() => onItemPress?.(item, index)}
+          key={`${item.title}-${item.organization}-${index}`}
           style={styles.historyRow}
         >
           <View style={styles.historyIconWrap}>
@@ -1703,8 +1906,361 @@ function ProfileHistorySection({ title, headerIcon, itemIcon, items, styles }) {
             </Text>
           </View>
           <Text style={styles.chevron}>›</Text>
-        </View>
+        </Pressable>
       ))}
+    </View>
+  );
+}
+
+function formatProfileExperienceDate(value) {
+  const date = parseBioExperienceDate(value);
+  if (!date) return "";
+  return `${String(date.getDate()).padStart(2, "0")}/${String(
+    date.getMonth() + 1,
+  ).padStart(2, "0")}/${date.getFullYear()}`;
+}
+
+function normalizeProfileHistoryDate(value) {
+  if (!value) return "";
+  if (typeof value === "object" && !(value instanceof Date)) {
+    const year = Number(value.year);
+    const month = Number(value.month || 1);
+    const day = Number(value.day || 1);
+    if (Number.isFinite(year) && Number.isFinite(month) && Number.isFinite(day)) {
+      return new Date(year, month - 1, day, 12).toISOString();
+    }
+  }
+  const date = parseBioExperienceDate(value);
+  return date ? date.toISOString() : "";
+}
+
+function ProfileHistoryItemEditScreen({
+  type = "experience",
+  initialData,
+  onBack,
+  onDone,
+  onRemove,
+  metrics,
+}) {
+  const styles = createStyles(metrics);
+  const isEducation = type === "education";
+  const textFields = isEducation
+    ? [
+        {
+          key: "school",
+          label: "School*",
+          placeholder: "Enter your school name",
+        },
+        {
+          key: "degree",
+          label: "Degree*",
+          placeholder: "Enter your degree",
+        },
+        {
+          key: "fieldOfStudy",
+          label: "Field Of Study*",
+          placeholder: "Field Of Study",
+        },
+      ]
+    : [
+        {
+          key: "title",
+          label: "Title*",
+          placeholder: "Enter your job title",
+        },
+        {
+          key: "company",
+          label: "Company*",
+          placeholder: "Enter your company name",
+        },
+      ];
+  const [form, setForm] = useState({
+    title: initialData?.title || "",
+    company: initialData?.company ?? initialData?.organization ?? "",
+    school: initialData?.school ?? initialData?.title ?? "",
+    degree: initialData?.degree ?? initialData?.organization ?? "",
+    fieldOfStudy:
+      initialData?.fieldOfStudy ?? initialData?.description ?? "",
+    currentlyWorkInRole:
+      initialData?.currentlyWorkInRole ?? initialData?.isCurrent ?? false,
+    startDate: normalizeProfileHistoryDate(
+      initialData?.startDate ?? initialData?.start_date,
+    ),
+    endDate: normalizeProfileHistoryDate(
+      initialData?.endDate ?? initialData?.end_date,
+    ),
+    description: initialData?.description || "",
+  });
+  const [iosDatePickerTarget, setIosDatePickerTarget] = useState("");
+  const [iosTempDate, setIosTempDate] = useState(new Date());
+  const parsedStartDate = parseBioExperienceDate(form.startDate);
+
+  function updateField(field, value) {
+    setForm((current) => ({ ...current, [field]: value }));
+  }
+
+  function setDateField(target, date) {
+    if (!date) return;
+    setForm((current) => {
+      const next = { ...current, [target]: date.toISOString() };
+      if (target === "startDate" && current.endDate) {
+        const currentEndDate = parseBioExperienceDate(current.endDate);
+        if (currentEndDate && date > currentEndDate) next.endDate = "";
+      }
+      return next;
+    });
+  }
+
+  function openDatePicker(target) {
+    if (target === "endDate" && form.currentlyWorkInRole) return;
+    if (Platform.OS === "web") return;
+    if (Platform.OS === "ios") {
+      setIosTempDate(getBioExperienceDateValue(form[target]));
+      setIosDatePickerTarget(target);
+      return;
+    }
+
+    DateTimePickerAndroid.open({
+      value: getBioExperienceDateValue(form[target]),
+      mode: "date",
+      display: "default",
+      maximumDate: new Date(),
+      minimumDate: target === "endDate" ? parsedStartDate : undefined,
+      onChange: (event, date) => {
+        if (event?.type !== "dismissed" && date) setDateField(target, date);
+      },
+    });
+  }
+
+  function renderDateField(target, label) {
+    const disabled = target === "endDate" && form.currentlyWorkInRole;
+    const dateText = formatProfileExperienceDate(form[target]);
+    const fieldStyle = [
+      styles.profileExperienceDateField,
+      disabled && styles.profileExperienceDisabledDateField,
+    ];
+    const dateValue = form[target] ? String(form[target]).slice(0, 10) : "";
+
+    return (
+      <View style={styles.profileExperienceDateGroup}>
+        <Text style={styles.profileExperienceFieldLabel}>{label}*</Text>
+        {Platform.OS === "web" ? (
+          <View style={fieldStyle}>
+            <Text
+              pointerEvents="none"
+              style={[
+                styles.profileExperienceDateText,
+                !dateText && styles.profileExperiencePlaceholder,
+              ]}
+            >
+              {dateText || "dd/mm/yyyy"}
+            </Text>
+            {/* <BioExperienceCalendarIcon styles={styles} /> */}
+            <input
+              aria-label={label}
+              type="date"
+              value={dateValue}
+              max={new Date().toISOString().slice(0, 10)}
+              min={target === "endDate" && parsedStartDate
+                ? parsedStartDate.toISOString().slice(0, 10)
+                : undefined}
+              disabled={disabled}
+              onChange={(event) => {
+                if (!event.target.value) {
+                  updateField(target, "");
+                  return;
+                }
+                const date = new Date(`${event.target.value}T12:00:00`);
+                if (!Number.isNaN(date.getTime())) setDateField(target, date);
+              }}
+              style={styles.profileExperienceWebDateInput}
+            />
+          </View>
+        ) : (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={label}
+            disabled={disabled}
+            onPress={() => openDatePicker(target)}
+            style={fieldStyle}
+          >
+            <Text
+              style={[
+                styles.profileExperienceDateText,
+                !dateText && styles.profileExperiencePlaceholder,
+              ]}
+            >
+              {dateText || "dd/mm/yyyy"}
+            </Text>
+            <BioExperienceCalendarIcon styles={styles} />
+          </Pressable>
+        )}
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.screen}>
+      <View style={styles.profileExperienceHeader}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Back"
+          hitSlop={10}
+          onPress={onBack}
+          style={styles.profileExperienceHeaderAction}
+        >
+          <Image
+            source={require("../assets/back_arrow.png")}
+            style={styles.headlineBackIcon}
+            resizeMode="contain"
+          />
+        </Pressable>
+        <Text style={styles.profileExperienceHeaderTitle}>
+          {isEducation ? "Education" : "Experience"}
+        </Text>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Done"
+          onPress={() => onDone(form)}
+          style={styles.profileExperienceDoneButton}
+        >
+          <Text style={styles.profileExperienceDoneText}>Done</Text>
+        </Pressable>
+      </View>
+
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.profileExperienceContent}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
+        {textFields.map((field) => (
+          <View
+            key={field.key}
+            style={styles.profileExperienceTextFieldGroup}
+          >
+            <Text style={styles.profileExperienceFieldLabel}>
+              {field.label}
+            </Text>
+            <TextInput
+              accessibilityLabel={field.label.replace("*", "")}
+              value={form[field.key]}
+              onChangeText={(value) => updateField(field.key, value)}
+              placeholder={field.placeholder}
+              placeholderTextColor="#7d879e"
+              maxLength={100}
+              style={styles.profileExperienceTextInput}
+              autoCapitalize="words"
+            />
+            <Text style={styles.profileExperienceCharacterCount}>
+              {form[field.key].length}/100
+            </Text>
+          </View>
+        ))}
+
+        {!isEducation ? (
+          <Pressable
+            accessibilityRole="checkbox"
+            accessibilityState={{ checked: form.currentlyWorkInRole }}
+            onPress={() => {
+              const nextValue = !form.currentlyWorkInRole;
+              updateField("currentlyWorkInRole", nextValue);
+              if (nextValue) updateField("endDate", "");
+            }}
+            style={styles.profileExperienceCurrentRow}
+          >
+            <View
+              style={[
+                styles.bioExperienceCheckbox,
+                form.currentlyWorkInRole &&
+                  styles.bioExperienceCheckboxSelected,
+              ]}
+            >
+              {form.currentlyWorkInRole ? (
+                <Text style={styles.bioExperienceCheckboxCheck}>✓</Text>
+              ) : null}
+            </View>
+            <Text style={styles.profileExperienceCurrentText}>
+              I currently work in this role
+            </Text>
+          </Pressable>
+        ) : null}
+
+        {renderDateField("startDate", "Start Date")}
+        {renderDateField("endDate", "End Date")}
+
+        <View style={styles.profileExperienceDescriptionGroup}>
+          <Text style={styles.profileExperienceFieldLabel}>Description</Text>
+          <TextInput
+            accessibilityLabel="Description"
+            value={form.description}
+            onChangeText={(value) => updateField("description", value)}
+            placeholder="Enter Your Job Description"
+            placeholderTextColor="#7d879e"
+            multiline
+            textAlignVertical="top"
+            style={styles.profileExperienceDescriptionInput}
+          />
+        </View>
+        {onRemove ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Remove ${isEducation ? "Education" : "Experience"}`}
+            onPress={onRemove}
+            style={styles.profileHistoryRemoveButton}
+          >
+            <Text style={styles.profileHistoryRemoveButtonText}>
+              Remove {isEducation ? "Education" : "Experience"}
+            </Text>
+          </Pressable>
+        ) : null}
+      </ScrollView>
+
+      {Platform.OS === "ios" && iosDatePickerTarget ? (
+        <Modal
+          transparent
+          animationType="fade"
+          onRequestClose={() => setIosDatePickerTarget("")}
+        >
+          <View style={styles.bioExperienceModalBackdrop}>
+            <View style={styles.bioExperienceDateModalCard}>
+              <Text style={styles.bioExperienceModalTitle}>
+                Select {iosDatePickerTarget === "startDate" ? "Start" : "End"} Date
+              </Text>
+              <DateTimePicker
+                value={iosTempDate}
+                mode="date"
+                display="spinner"
+                maximumDate={new Date()}
+                minimumDate={
+                  iosDatePickerTarget === "endDate" ? parsedStartDate : undefined
+                }
+                onChange={(_event, date) => {
+                  if (date) setIosTempDate(date);
+                }}
+                style={styles.bioExperienceIosDatePicker}
+              />
+              <View style={styles.bioExperienceDateActions}>
+                <Pressable
+                  onPress={() => setIosDatePickerTarget("")}
+                  style={styles.bioExperienceDateAction}
+                >
+                  <Text style={styles.bioExperienceDateActionText}>Cancel</Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => {
+                    setDateField(iosDatePickerTarget, iosTempDate);
+                    setIosDatePickerTarget("");
+                  }}
+                  style={styles.bioExperienceDateAction}
+                >
+                  <Text style={styles.bioExperienceDateActionText}>Done</Text>
+                </Pressable>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      ) : null}
     </View>
   );
 }
@@ -3029,9 +3585,6 @@ function EquitySplitEditScreen({
           </View>
         ) : (
           <>
-            <Text style={styles.equityStatus}>
-              {selectedOption || "Not Selected"}
-            </Text>
             <Text style={styles.equityQuestion}>
               What’s your equity split expectation?
             </Text>
@@ -3077,7 +3630,7 @@ function EquitySplitEditScreen({
 }
 
 export default function ProfileEditScreen({
-  profile,
+  profile = {},
   profileImageUrl = "",
   firebaseToken = "",
   initialDateOfBirth = "",
@@ -3105,6 +3658,12 @@ export default function ProfileEditScreen({
   const [isEditingJobSearchProfile, setIsEditingJobSearchProfile] =
     useState(false);
   const [isEditingBioExperience, setIsEditingBioExperience] = useState(false);
+  const [isEditingProfileExperience, setIsEditingProfileExperience] =
+    useState(false);
+  const [isEditingProfileEducation, setIsEditingProfileEducation] =
+    useState(false);
+  const [editingExperienceIndex, setEditingExperienceIndex] = useState(undefined);
+  const [editingEducationIndex, setEditingEducationIndex] = useState(undefined);
   const [isEditingCompensation, setIsEditingCompensation] = useState(false);
   const [isEditingCompanySize, setIsEditingCompanySize] = useState(false);
   const [isEditingWorkAuthorization, setIsEditingWorkAuthorization] =
@@ -3274,9 +3833,9 @@ export default function ProfileEditScreen({
     normalizeProfileDateOfBirth(initialDateOfBirth),
   );
   const [profileLocation, setProfileLocation] = useState(
-    profile.locationPreference,
+    profile?.locationPreference ?? null,
   );
-  const [linkedinUrl, setLinkedinUrl] = useState(undefined);
+  const [linkedinUrl, setLinkedinUrl] = useState(profile?.linkedinUrl ?? profile?.linkedin_url ?? "");
   const [schedulingLink, setSchedulingLink] = useState(undefined);
   const [profileExperiences, setProfileExperiences] = useState([]);
   const [profileEducation, setProfileEducation] = useState([]);
@@ -3317,9 +3876,18 @@ export default function ProfileEditScreen({
             }
             return {
               title: exp.title || "",
+              company: exp.company || "",
               organization: exp.company || "",
               dates: datesStr,
               description: exp.description || "",
+              startDate: normalizeProfileHistoryDate(exp.start_date),
+              endDate: normalizeProfileHistoryDate(exp.end_date),
+              currentlyWorkInRole: Boolean(
+                exp.is_current || (exp.start_date && !exp.end_date),
+              ),
+              isCurrent: Boolean(
+                exp.is_current || (exp.start_date && !exp.end_date),
+              ),
               muted: false,
             };
           });
@@ -3591,6 +4159,151 @@ export default function ProfileEditScreen({
     );
   }
 
+  if (isEditingProfileExperience) {
+    const experienceToEdit = profileExperiences[editingExperienceIndex] || {};
+    const canRemoveExperience =
+      editingExperienceIndex !== undefined &&
+      editingExperienceIndex >= 0 &&
+      editingExperienceIndex < profileExperiences.length;
+    return (
+      <ProfileHistoryItemEditScreen
+        initialData={experienceToEdit}
+        onBack={() => {
+          setIsEditingProfileExperience(false);
+          setEditingExperienceIndex(undefined);
+        }}
+        onRemove={
+          canRemoveExperience
+            ? () => {
+                setProfileExperiences((current) =>
+                  current.filter((_, index) => index !== editingExperienceIndex),
+                );
+                setIsEditingProfileExperience(false);
+                setEditingExperienceIndex(undefined);
+              }
+            : undefined
+        }
+        onDone={(experience) => {
+          const startDate = formatProfileExperienceDate(experience.startDate);
+          const endDate = experience.currentlyWorkInRole
+            ? "Present"
+            : formatProfileExperienceDate(experience.endDate);
+          setProfileExperiences((current) => {
+            const hasExistingExperience =
+              editingExperienceIndex !== undefined &&
+              editingExperienceIndex >= 0 &&
+              editingExperienceIndex < current.length;
+            const updatedExperience = {
+              ...(hasExistingExperience
+                ? current[editingExperienceIndex]
+                : {}),
+              title: experience.title.trim(),
+              company: experience.company.trim(),
+              organization: experience.company.trim(),
+              dates:
+                startDate && endDate
+                  ? `${startDate} - ${endDate}`
+                  : startDate || endDate,
+              description: experience.description.trim(),
+              startDate: experience.startDate,
+              endDate: experience.currentlyWorkInRole ? "" : experience.endDate,
+              currentlyWorkInRole: experience.currentlyWorkInRole,
+              isCurrent: experience.currentlyWorkInRole,
+              muted: false,
+            };
+
+            if (hasExistingExperience) {
+              const updated = [...current];
+              updated[editingExperienceIndex] = updatedExperience;
+              return updated;
+            }
+            return [...current, updatedExperience];
+          });
+          setIsEditingProfileExperience(false);
+          setEditingExperienceIndex(undefined);
+        }}
+        metrics={metrics}
+      />
+    );
+  }
+
+  if (isEditingProfileEducation) {
+    // Find the education being edited (if any) to pass as initial data
+    const educationToEdit = profileEducation[editingEducationIndex] || {};
+    const canRemoveEducation =
+      editingEducationIndex !== undefined &&
+      editingEducationIndex >= 0 &&
+      editingEducationIndex < profileEducation.length;
+    return (
+      <ProfileHistoryItemEditScreen
+        type="education"
+        initialData={educationToEdit}
+        onBack={() => {
+          setIsEditingProfileEducation(false);
+          setEditingEducationIndex(undefined);
+        }}
+        onRemove={
+          canRemoveEducation
+            ? () => {
+                setProfileEducation((current) =>
+                  current.filter((_, index) => index !== editingEducationIndex),
+                );
+                setIsEditingProfileEducation(false);
+                setEditingEducationIndex(undefined);
+              }
+            : undefined
+        }
+        onDone={(education) => {
+          const startDate = formatProfileExperienceDate(education.startDate);
+          const endDate = formatProfileExperienceDate(education.endDate);
+          setProfileEducation((current) => {
+            // If we're updating an existing education, replace it; otherwise add new
+            if (editingEducationIndex !== undefined && editingEducationIndex >= 0) {
+              const updated = [...current];
+              updated[editingEducationIndex] = {
+                title: education.school.trim(),
+                organization: education.degree.trim(),
+                fieldOfStudy: education.fieldOfStudy.trim(),
+                dates: startDate || endDate ? `${startDate} - ${endDate}` : "",
+                description: [
+                  education.fieldOfStudy.trim(),
+                  education.description.trim(),
+                ]
+                .filter(Boolean)
+                .join(" · "),
+                startDate: education.startDate,
+                endDate: education.endDate,
+                muted: false,
+              };
+              return updated;
+            }
+            return [
+              ...current,
+              {
+                title: education.school.trim(),
+                organization: education.degree.trim(),
+                fieldOfStudy: education.fieldOfStudy.trim(),
+                dates: startDate || endDate ? `${startDate} - ${endDate}` : "",
+                description: [
+                  education.fieldOfStudy.trim(),
+                  education.description.trim(),
+                ]
+                .filter(Boolean)
+                .join(" · "),
+                startDate: education.startDate,
+                endDate: education.endDate,
+                muted: false,
+              },
+            ];
+          });
+          setIsEditingProfileEducation(false);
+          setEditingEducationIndex(undefined);
+        }}
+        metrics={metrics}
+      />
+    );
+  }
+
   if (isEditingCompensation) {
     return (
       <CompensationEditScreen
@@ -3688,7 +4401,9 @@ export default function ProfileEditScreen({
     return (
       <LinkedinProfileEditScreen
         initialUrl={
-          linkedinUrl ?? "https://www.linkedin.com/in/sohaib-rahman-a5"
+          linkedinUrl || profile?.linkedinUrl ||
+          profile?.linkedin_url ||
+          ""
         }
         onDone={(value) => {
           setLinkedinUrl(value);
@@ -4146,6 +4861,14 @@ export default function ProfileEditScreen({
             headerIcon={require("../assets/linkedin.png")}
             itemIcon={require("../assets/briefcase.png")}
             items={profileExperiences}
+            onAdd={() => {
+              setIsEditingProfileExperience(true);
+              setEditingExperienceIndex(undefined);
+            }}
+            onItemPress={(_item, index) => {
+              setEditingExperienceIndex(index);
+              setIsEditingProfileExperience(true);
+            }}
             styles={styles}
           />
           <ProfileHistorySection
@@ -4153,6 +4876,14 @@ export default function ProfileEditScreen({
             headerIcon={require("../assets/linkedin.png")}
             itemIcon={require("../assets/graduation.png")}
             items={profileEducation}
+            onAdd={() => {
+              setIsEditingProfileEducation(true);
+              setEditingEducationIndex(undefined);
+            }}
+            onItemPress={(_item, index) => {
+              setEditingEducationIndex(index);
+              setIsEditingProfileEducation(true);
+            }}
             styles={styles}
           />
         </View>
@@ -4442,6 +5173,139 @@ function createStyles(metrics) {
       lineHeight: scale(26),
       marginLeft: scale(16),
     },
+    profileExperienceHeader: {
+      minHeight: scale(72),
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      paddingHorizontal: metrics.vw(5),
+    },
+    profileExperienceHeaderAction: {
+      width: scale(34),
+      minHeight: scale(44),
+      justifyContent: "center",
+    },
+    profileExperienceHeaderTitle: {
+      flex: 1,
+      color: "#080808",
+      fontSize: scale(25),
+      fontWeight: "700",
+      textAlign: "center",
+    },
+    profileExperienceDoneButton: {
+      width: scale(58),
+      minHeight: scale(44),
+      justifyContent: "center",
+      alignItems: "flex-end",
+    },
+    profileExperienceDoneText: {
+      color: "#08b9c2",
+      fontSize: scale(22),
+    },
+    profileExperienceContent: {
+      flexGrow: 1,
+      paddingHorizontal: metrics.vw(6.3),
+      paddingTop: scale(43),
+      paddingBottom: scale(32),
+    },
+    profileExperienceTextFieldGroup: { marginBottom: scale(24) },
+    profileExperienceFieldLabel: {
+      color: "#7d879e",
+      fontSize: scale(18),
+      lineHeight: scale(25),
+    },
+    profileExperienceTextInput: {
+      minHeight: scale(42),
+      borderBottomWidth: scale(2),
+      borderBottomColor: "#d7d4ce",
+      color: "#000000",
+      fontSize: scale(18),
+      lineHeight: scale(25),
+      paddingHorizontal: scale(4),
+      paddingVertical: scale(6),
+    },
+    profileExperienceCharacterCount: {
+      color: "#7d879e",
+      fontSize: scale(18),
+      lineHeight: scale(25),
+      marginTop: scale(5),
+      textAlign: "right",
+    },
+    profileExperienceCurrentRow: {
+      minHeight: scale(48),
+      flexDirection: "row",
+      alignItems: "center",
+      paddingHorizontal: scale(8),
+      marginBottom: scale(64),
+    },
+    profileExperienceCurrentText: {
+      color: "#a2a2a2",
+      fontSize: scale(18),
+      marginLeft: scale(14),
+    },
+    profileExperienceDateGroup: { marginBottom: scale(36) },
+    profileExperienceDateField: {
+      minHeight: scale(42),
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      borderBottomWidth: scale(2),
+      borderBottomColor: "#d7d4ce",
+      paddingHorizontal: scale(4),
+      position: "relative",
+    },
+    profileExperienceDisabledDateField: { opacity: 0.55 },
+    profileExperienceDateText: {
+      flex: 1,
+      color: "#000000",
+      fontSize: scale(18),
+      lineHeight: scale(25),
+    },
+    profileExperiencePlaceholder: { color: "#7d879e" },
+    profileExperienceWebDateInput: {
+      position: "absolute",
+      top: 0,
+      right: 0,
+      bottom: 0,
+      left: 0,
+      width: "100%",
+      height: "100%",
+      borderWidth: 0,
+      backgroundColor: "transparent",
+      color: "transparent",
+      fontFamily: "inherit",
+      fontSize: scale(18),
+      padding: 0,
+    },
+    profileExperienceDescriptionGroup: { marginTop: scale(14) },
+    profileExperienceDescriptionInput: {
+      minHeight: scale(170),
+      borderBottomWidth: scale(2),
+      borderBottomColor: "#d7d4ce",
+      color: "#000000",
+      fontSize: scale(18),
+      lineHeight: scale(25),
+      paddingHorizontal: scale(4),
+      paddingTop: scale(4),
+      paddingBottom: scale(20),
+      textAlignVertical: "top",
+    },
+    profileHistoryRemoveButton: {
+      minHeight: scale(48),
+      alignItems: "center",
+      justifyContent: "center",
+      borderWidth: scale(1),
+      borderColor: "#cf4b4b",
+      borderRadius: scale(8),
+      marginTop: scale(28),
+      marginHorizontal: scale(4),
+      marginBottom: scale(12),
+    },
+    profileHistoryRemoveButtonText: {
+      color: "#cf4b4b",
+      fontSize: scale(18),
+      fontWeight: "600",
+    },
     bioExperienceHeader: {
       minHeight: scale(72),
       flexDirection: "row",
@@ -4477,6 +5341,19 @@ function createStyles(metrics) {
       paddingTop: scale(10),
       paddingBottom: scale(36),
     },
+    bioExperienceInputLabel: {
+      color: "#7d879e",
+      fontSize: scale(18),
+      lineHeight: scale(25),
+    },
+    bioExperienceTextField: {
+      minHeight: scale(78),
+      borderBottomWidth: scale(2),
+      borderBottomColor: "#d7d4ce",
+      marginBottom: scale(46),
+      paddingTop: scale(2),
+      paddingHorizontal: scale(4),
+    },
     bioExperienceFieldRow: {
       minHeight: scale(52),
       flexDirection: "row",
@@ -4502,21 +5379,18 @@ function createStyles(metrics) {
       marginLeft: scale(12),
     },
     bioExperienceTextInput: {
-      minHeight: scale(52),
-      borderBottomWidth: scale(2),
-      borderBottomColor: "#d7d4ce",
-      color: "#333",
+      minHeight: scale(40),
+      flexGrow: 1,
+      color: "#000000",
       fontSize: scale(18),
       lineHeight: scale(25),
-      paddingHorizontal: scale(4),
-      paddingVertical: scale(10),
-      marginBottom: scale(46),
+      paddingHorizontal: 0,
+      paddingTop: scale(2),
+      paddingBottom: scale(6),
     },
     bioExperienceLongInput: {
-      minHeight: scale(148),
-      paddingTop: scale(24),
+      minHeight: scale(176),
       marginBottom: scale(42),
-      textAlignVertical: "top",
     },
     bioExperienceDateField: {
       minHeight: scale(40),
@@ -4759,9 +5633,10 @@ function createStyles(metrics) {
       height: metrics.vh(26),
       marginTop: scale(38),
       marginHorizontal: metrics.vw(9.2),
+      borderWidth: scale(2),
+      borderColor: "#d7d3cf",
       borderRadius: scale(18),
-      padding: scale(24),
-      backgroundColor: "#fff",
+      padding: scale(12),
       color: "#111",
       fontSize: scale(17),
       lineHeight: scale(24),
@@ -4780,6 +5655,26 @@ function createStyles(metrics) {
       lineHeight: scale(25),
       paddingHorizontal: scale(4),
       paddingVertical: scale(12),
+    },
+    profileLinkedinInputRow: {
+      flexDirection: "row",
+      alignItems: "center",
+    },
+    profileLinkedinUrlInput: {
+      flex: 1,
+      minWidth: 0,
+    },
+    profileLinkedinPreviewButton: {
+      width: scale(44),
+      height: scale(52),
+      alignItems: "center",
+      justifyContent: "center",
+      marginLeft: scale(8),
+    },
+    profileLinkedinPreviewArrow: {
+      width: scale(26),
+      height: scale(26),
+      tintColor: "#20b8c2",
     },
     profileNameLastInput: {
       marginTop: scale(54),
@@ -4909,9 +5804,33 @@ function createStyles(metrics) {
       justifyContent: "center",
       padding: scale(18),
     },
+    profileLinkedinPreviewFilled: {
+      justifyContent: "flex-start",
+      paddingVertical: scale(18),
+    },
+    profileLinkedinPreviewDetails: {
+      gap: scale(8),
+    },
+    profileLinkedinPreviewHeadline: {
+      color: "#262626",
+      fontSize: scale(17),
+      lineHeight: scale(23),
+      fontWeight: "700",
+    },
+    profileLinkedinPreviewMeta: {
+      color: "#262626",
+      fontSize: scale(15),
+      lineHeight: scale(22),
+    },
     profileLinkedinPreviewText: {
       color: "#a2a2a2",
       fontSize: scale(17),
+    },
+    profileLinkedinPreviewError: {
+      color: "#c44f4f",
+      fontSize: scale(14),
+      lineHeight: scale(20),
+      marginTop: scale(12),
     },
     profileFieldRow: {
       marginBottom: 16,
@@ -4956,10 +5875,11 @@ function createStyles(metrics) {
     },
     ideaEditorInput: {
       height: metrics.vh(26),
-      marginTop: scale(22),
+      marginTop: scale(38),
+      borderWidth: scale(2),
+      borderColor: "#d7d3cf",
       borderRadius: scale(18),
-      padding: scale(24),
-      backgroundColor: "#fff",
+      padding: scale(12),
       color: "#111",
       fontSize: scale(17),
       lineHeight: scale(24),
@@ -4970,21 +5890,23 @@ function createStyles(metrics) {
       paddingTop: scale(36),
     },
     promptSelector: {
-      minHeight: scale(70),
-      paddingHorizontal: scale(24),
-      borderWidth: scale(1.5),
-      borderColor: "#d7d7d7",
-      borderRadius: scale(18),
-      backgroundColor: "#fff",
+      minHeight: scale(52),
       flexDirection: "row",
       alignItems: "center",
       justifyContent: "space-between",
+      borderBottomWidth: scale(2),
+      borderBottomColor: "#d7d4ce",
+      paddingHorizontal: scale(4),
+      marginBottom: scale(46),
+      backgroundColor: "transparent",
     },
     promptSelectorText: {
-      color: "#080808",
-      fontSize: scale(17),
-      fontWeight: "700",
+      flex: 1,
+      color: "#333",
+      fontSize: scale(18),
+      lineHeight: scale(25),
     },
+
     promptEditIcon: { width: scale(30), height: scale(30) },
     promptList: {
       flex: 1,
@@ -5036,7 +5958,6 @@ function createStyles(metrics) {
       borderColor: "#d7d7d7",
       borderRadius: scale(18),
       padding: scale(20),
-      backgroundColor: "#fff",
       color: "#111",
       fontSize: scale(17),
       lineHeight: scale(24),
@@ -5532,6 +6453,12 @@ function createStyles(metrics) {
       gap: scale(16),
     },
     historyHeaderIcon: { width: scale(34), height: scale(34) },
+    historyAddButton: {
+      minWidth: scale(36),
+      minHeight: scale(44),
+      alignItems: "center",
+      justifyContent: "center",
+    },
     addIcon: { color: "#596772", fontSize: scale(34), lineHeight: scale(38) },
     historyRow: {
       minHeight: scale(132),

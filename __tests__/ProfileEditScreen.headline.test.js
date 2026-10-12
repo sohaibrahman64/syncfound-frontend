@@ -1,11 +1,12 @@
 import React from "react";
-import { fireEvent, render } from "@testing-library/react-native";
+import { fireEvent, render, waitFor } from "@testing-library/react-native";
 import {
   getIndustries,
   getMyProfileIndustries,
   getMyProfileLinkedinDetails,
   getPrompts,
 } from "../utils/backendAuth";
+import { apiFetch } from "../utils/apiClient";
 import ProfileEditScreen from "../screens/ProfileEditScreen";
 
 jest.mock("../utils/backendAuth", () => ({
@@ -15,7 +16,12 @@ jest.mock("../utils/backendAuth", () => ({
   getPrompts: jest.fn(),
 }));
 
+jest.mock("../utils/apiClient", () => ({
+  apiFetch: jest.fn(),
+}));
+
 beforeEach(() => {
+  apiFetch.mockReset();
   getIndustries.mockResolvedValue([
     { id: 1, industry_name: "Social Networks" },
     { id: 2, industry_name: "Travel" },
@@ -295,6 +301,78 @@ describe("ProfileEditScreen personal detail editors", () => {
     fireEvent.press(getByText("Done"));
 
     expect(getByText("https://www.linkedin.com/in/ada-lovelace")).toBeTruthy();
+  });
+
+  it("loads and displays the LinkedIn profile preview from the arrow button", async () => {
+    apiFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        basic_info: {
+          headline: "Mathematician and writer",
+          connection_count: 500,
+          location: { full: "London, England" },
+        },
+        experience: [{ company: "Analytical Engines" }],
+        education: [{ school: "University of London" }],
+      }),
+    });
+
+    const { getByLabelText, getByText } = render(
+      <ProfileEditScreen profile={{ locationPreference: [] }} />,
+    );
+
+    fireEvent.press(getByLabelText("LinkedIn"));
+    await waitFor(() => {
+      expect(getByText("Mathematician and writer")).toBeTruthy();
+    });
+    fireEvent.changeText(
+      getByLabelText("LinkedIn profile URL"),
+      "https://www.linkedin.com/in/ada-lovelace",
+    );
+    fireEvent.press(getByLabelText("Load LinkedIn profile preview"));
+
+    await waitFor(() => {
+      expect(getByText("Mathematician and writer")).toBeTruthy();
+      expect(
+        getByText(
+          "Analytical Engines • University of London • London, England • 500 connections on LinkedIn",
+        ),
+      ).toBeTruthy();
+    });
+
+    expect(apiFetch).toHaveBeenCalledWith(
+      "/linkedin-profile?username=ada-lovelace",
+      expect.objectContaining({ method: "GET" }),
+    );
+  });
+
+  it("loads the LinkedIn profile preview when the editor opens", async () => {
+    apiFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        basic_info: {
+          headline: "Mathematician and writer",
+          connection_count: 500,
+          location: { full: "London, England" },
+        },
+        experience: [{ company: "Analytical Engines" }],
+        education: [{ school: "University of London" }],
+      }),
+    });
+
+    const { getByLabelText, getByText } = render(
+      <ProfileEditScreen profile={{ locationPreference: [] }} />,
+    );
+
+    fireEvent.press(getByLabelText("LinkedIn"));
+
+    await waitFor(() => {
+      expect(getByText("Mathematician and writer")).toBeTruthy();
+    });
+    expect(apiFetch).toHaveBeenCalledWith(
+      "/linkedin-profile?username=sohaib-rahman-a5",
+      expect.objectContaining({ method: "GET" }),
+    );
   });
 
   it("edits the scheduling link", () => {
