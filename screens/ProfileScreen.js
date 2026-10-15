@@ -281,6 +281,7 @@ export default function ProfileScreen({
   );
 }
 
+// Fix for duplicate bottom tab bar causing increased navigation bar height
 function createStyles(metrics, insets) {
   const scale = metrics.moderateScale;
   return withPlatformFontStyles({
