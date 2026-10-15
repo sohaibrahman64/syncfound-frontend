@@ -277,25 +277,6 @@ export default function ProfileScreen({
         </>
       )}
 
-      <View style={styles.bottomTabBar}>
-        {TAB_ITEMS.map((item) => {
-          const isActive = item.key === "profile";
-          return (
-            <Pressable
-              key={item.key}
-              accessibilityRole="button"
-              accessibilityState={{ selected: isActive }}
-              onPress={() => onNavigate?.(item.key)}
-              style={styles.tabItem}
-            >
-              <Image source={item.icon} style={styles.tabIcon} resizeMode="contain" />
-              <Text style={[styles.tabLabel, isActive && styles.tabLabelActive]}>
-                {item.label}
-              </Text>
-            </Pressable>
-          );
-        })}
-      </View>
     </View>
   );
 }
