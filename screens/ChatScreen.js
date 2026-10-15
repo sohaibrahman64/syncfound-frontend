@@ -15,6 +15,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useResponsiveMetrics } from '../utils/responsive';
 import { withPlatformFontStyles } from '../utils/typography';
+import BottomNavigation from '../components/BottomNavigation';
 import useChatsList from '../hooks/useChatsList';
 import useChatThread from '../hooks/useChatThread';
 import useMarkRead from '../hooks/useMarkRead';
@@ -53,13 +54,6 @@ export default function ChatScreen({
   const messageListRef = useRef(null);
   const pendingScrollIndexRef = useRef(null);
   const appStateRef = useRef(AppState.currentState);
-
-  const navItems = useMemo(() => [
-    { key: 'invites', label: 'Invites', icon: require('../assets/invites-inactive.png'), active: false },
-    { key: 'sync', label: 'Sync', icon: require('../assets/sync-inactive.png'), active: false },
-    { key: 'chat', label: 'Chat', icon: require('../assets/chat-active.png'), active: true },
-    { key: 'profile', label: 'Profile', icon: require('../assets/profile-inactive.png'), active: false },
-  ], []);
 
   const {
     items,
@@ -343,14 +337,13 @@ export default function ChatScreen({
   ];
 
   const renderBottomNav = () => (
-    <View style={styles.bottomTabBar}>
-      {navItems.map((item) => (
-        <Pressable key={item.key} style={styles.navItem} onPress={() => onNavigate?.(item.key)}>
-          <Image source={item.icon} style={styles.navIcon} />
-          <Text style={item.active ? styles.navTextActive : styles.navText}>{item.label}</Text>
-        </Pressable>
-      ))}
-    </View>
+    <BottomNavigation
+      activeTab="chat"
+      onNavigate={onNavigate}
+      metrics={metrics}
+      bottomInset={insets.bottom}
+      isOverlay={false}
+    />
   );
 
   if (selectedConversationId) {
@@ -729,7 +722,6 @@ export default function ChatScreen({
 function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }, insets = {}) {
   const isNarrowScreen = width < 370;
   const topInset = insets?.top || 0;
-  const bottomInset = insets?.bottom || 0;
 
   return StyleSheet.create(withPlatformFontStyles({
     container: {
@@ -1247,40 +1239,6 @@ function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }, 
       color: '#6f7b96',
       textAlign: 'center',
       letterSpacing: 0.1,
-    },
-    bottomTabBar: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-around',
-      backgroundColor: '#f4f4f4',
-      borderTopWidth: 1,
-      borderTopColor: '#e4e4e4',
-      paddingTop: vh(1),
-      paddingBottom: Math.max(vh(1), bottomInset + vh(0.45)),
-      paddingHorizontal: vw(2),
-    },
-    navItem: {
-      alignItems: 'center',
-      justifyContent: 'center',
-      minWidth: vw(20),
-    },
-    navIcon: {
-      width: moderateScale(32),
-      height: moderateScale(32),
-      resizeMode: 'contain',
-      marginBottom: vh(0.2),
-    },
-    navText: {
-      fontSize: responsiveFont(15, 12, 16),
-      lineHeight: responsiveFont(19, 15, 20),
-      fontWeight: '400',
-      color: '#9a9a9a',
-    },
-    navTextActive: {
-      fontSize: responsiveFont(15, 12, 16),
-      lineHeight: responsiveFont(19, 15, 20),
-      fontWeight: '500',
-      color: '#20bcc8',
     },
   }));
 }

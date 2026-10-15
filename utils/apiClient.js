@@ -1,4 +1,5 @@
 import { BASE_URL } from "./Constants";
+import { fetch as expoFetch } from "expo/fetch";
 
 const API_BASE_URL = String(process.env.EXPO_PUBLIC_API_BASE_URL || BASE_URL)
   .trim()
@@ -11,7 +12,9 @@ export async function apiFetch(path, options = {}) {
   const isFormData =
     typeof FormData !== "undefined" && options.body instanceof FormData;
 
-  return fetch(url, {
+  const fetchRequest = isFormData ? expoFetch : fetch;
+
+  return fetchRequest(url, {
     ...options,
     headers: {
       "ngrok-skip-browser-warning": "true",

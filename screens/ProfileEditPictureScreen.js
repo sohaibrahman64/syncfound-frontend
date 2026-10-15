@@ -69,10 +69,14 @@ export default function ProfileEditPictureScreen({
   initialTranslateX = 0,
   initialTranslateY = 0,
   initialCropRect = null,
+  profileEditTheme = false,
 }) {
   const metrics = useResponsiveMetrics();
   const insets = useSafeAreaInsets();
-  const styles = useMemo(() => createStyles(metrics, insets), [metrics, insets.top, insets.bottom]);
+  const styles = useMemo(
+    () => createStyles(metrics, insets, profileEditTheme),
+    [metrics, insets.top, insets.bottom, profileEditTheme],
+  );
   const frameSize = Math.min(metrics.width, metrics.height) * 0.9;
 
   function clampTranslation(value, forScale) {
@@ -448,16 +452,22 @@ export default function ProfileEditPictureScreen({
   );
 }
 
-function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }, insets = {}) {
+function createStyles(
+  { width, height, vw, vh, moderateScale, responsiveFont },
+  insets = {},
+  profileEditTheme = false,
+) {
   const isShortScreen = height < 760;
   const frameSize = Math.min(width, height) * 0.9;
   const topInset = insets?.top || 0;
   const bottomInset = insets?.bottom || 0;
+  const backgroundColor = profileEditTheme ? '#f0eee5' : '#efefef';
+  const accentColor = profileEditTheme ? '#2dbcc4' : '#00afce';
 
   return StyleSheet.create(withPlatformFontStyles({
     container: {
       flex: 1,
-      backgroundColor: '#efefef',
+      backgroundColor,
     },
     header: {
       flexDirection: 'row',
@@ -468,7 +478,7 @@ function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }, 
       paddingBottom: vh(1.2),
       borderBottomWidth: 1,
       borderBottomColor: '#d9d9d9',
-      backgroundColor: '#efefef',
+      backgroundColor,
     },
     headerIconWrap: {
       minWidth: moderateScale(34),
@@ -603,7 +613,7 @@ function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }, 
       alignItems: 'center',
     },
     rulerLabel: {
-      color: '#028fb0',
+      color: profileEditTheme ? '#08a9b8' : '#028fb0',
       fontSize: responsiveFont(isShortScreen ? 34 : 38, 24, 42),
       lineHeight: responsiveFont(isShortScreen ? 40 : 44, 28, 48),
       fontWeight: '700',
@@ -632,12 +642,12 @@ function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }, 
       marginLeft: -1,
       width: 3,
       height: moderateScale(30),
-      backgroundColor: '#00a3c4',
+      backgroundColor: accentColor,
       borderRadius: 2,
     },
     toolBar: {
       marginTop: 'auto',
-      backgroundColor: '#090909',
+      backgroundColor: profileEditTheme ? '#f0eee5' : '#090909',
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-evenly',
@@ -655,16 +665,16 @@ function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }, 
     toolButtonActive: {
       opacity: 1,
       borderBottomWidth: 2,
-      borderBottomColor: '#00afce',
+      borderBottomColor: accentColor,
     },
     toolIcon: {
       width: moderateScale(34),
       height: moderateScale(34),
       resizeMode: 'contain',
-      tintColor: '#00afce',
+      tintColor: accentColor,
     },
     toolLabel: {
-      color: '#f0f0f0',
+      color: profileEditTheme ? '#343434' : '#f0f0f0',
       fontSize: responsiveFont(15, 13, 17),
       lineHeight: responsiveFont(20, 16, 22),
       fontWeight: '500',

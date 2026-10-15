@@ -23,6 +23,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import {BASE_URL_NO_API} from "../utils/Constants";
 import { BlurView } from "expo-blur";
 import { LinearGradient } from "expo-linear-gradient";
 import { WebView } from "react-native-webview";
@@ -49,6 +50,7 @@ import {
 } from "../utils/swipeMonetization";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { withPlatformFontStyles } from "../utils/typography";
+import BottomNavigation from "../components/BottomNavigation";
 import InvitesScreen from "./InvitesScreen";
 import ChatScreen from "./ChatScreen";
 import ProfileScreen from "./ProfileScreen";
@@ -410,7 +412,10 @@ function MatchCard({ card, styles }) {
         <View style={styles.cardPhotoWrap}>
           {card.profilePhotoUrl ? (
             <Image
-              source={{ uri: card.profilePhotoUrl }}
+              source={{
+                //uri: `${BASE_URL_NO_API}${card.profilePhotoUrl.replace(/^\/+/, "")}`,
+                uri: card.profilePhotoUrl
+              }}
               style={styles.cardPhoto}
             />
           ) : (
@@ -1085,7 +1090,12 @@ export default function HomeScreen({
   );
 
   const pollEntitlementsForCheckout = useCallback(
-    async ({ checkoutSessionId = "", returnStatus = "", maxAttempts = 6, intervalMs = 2500 } = {}) => {
+    async ({
+      checkoutSessionId = "",
+      returnStatus = "",
+      maxAttempts = 6,
+      intervalMs = 2500,
+    } = {}) => {
       const normalizedStatus = String(returnStatus || "")
         .trim()
         .toLowerCase();
@@ -1717,7 +1727,7 @@ export default function HomeScreen({
     transform: [
       { translateX: swipePosition.x },
       { translateY: swipePosition.y },
-      { ROTATE: cardRotation },
+      { rotate: cardRotation },
     ],
   };
 
@@ -1981,69 +1991,14 @@ export default function HomeScreen({
         </View>
       ) : null}
 
-      <View style={styles.bottomTabBar}>
-        <Pressable
-          style={styles.tabItem}
-          onPress={() => handleNavigateBottomTab(TAB_INVITES)}
-        >
-          <View style={styles.tabIconWrap}>
-            <Image
-              source={require("../assets/invites-inactive.png")}
-              style={styles.tabIcon}
-            />
-            {inviteUnreadCount > 0 ? (
-              <View style={styles.tabBadgeWrap}>
-                <Text style={styles.tabBadgeText}>
-                  {inviteUnreadCount > 99 ? "99+" : String(inviteUnreadCount)}
-                </Text>
-              </View>
-            ) : null}
-          </View>
-          <Text style={styles.tabLabel}>Invites</Text>
-        </Pressable>
-
-        <Pressable
-          style={styles.tabItem}
-          onPress={() => handleNavigateBottomTab(TAB_SYNC)}
-        >
-          <Image
-            source={require("../assets/sync-active.png")}
-            style={styles.tabIcon}
-          />
-          <Text style={styles.tabLabelActive}>Sync</Text>
-        </Pressable>
-
-        <Pressable
-          style={styles.tabItem}
-          onPress={() => handleNavigateBottomTab(TAB_CHAT)}
-        >
-          <View style={styles.tabIconWrap}>
-            <Image
-              source={require("../assets/chat-inactive.png")}
-              style={styles.tabIcon}
-            />
-            {chatUnreadCount > 0 ? (
-              <View style={styles.tabBadgeWrap}>
-                <Text style={styles.tabBadgeText}>
-                  {chatUnreadCount > 99 ? "99+" : String(chatUnreadCount)}
-                </Text>
-              </View>
-            ) : null}
-          </View>
-          <Text style={styles.tabLabel}>Chat</Text>
-        </Pressable>
-
-        <Pressable
-          style={styles.tabItem}
-          onPress={() => handleNavigateBottomTab(TAB_PROFILE)}
-        >
-          <Image
-            source={require("../assets/profile-inactive.png")}
-            style={styles.tabIcon}
-          />
-          <Text style={styles.tabLabel}>Profile</Text>
-        </Pressable>
-      </View>
+      <BottomNavigation
+        activeTab="sync"
+        onNavigate={handleNavigateBottomTab}
+        metrics={metrics}
+        bottomInset={insets.bottom}
+        inviteUnreadCount={inviteUnreadCount}
+        chatUnreadCount={chatUnreadCount}
+      />
 
       {isPaging ? (
         <View style={styles.pagingIndicatorWrap}>
@@ -2916,70 +2871,6 @@ function createStyles(
         width: moderateScale(36),
         height: moderateScale(36),
         resizeMode: "contain",
-      },
-      bottomTabBar: {
-        position: "absolute",
-        left: 0,
-        right: 0,
-        bottom: bottomInset + vh(0.6),
-        width: "100%",
-        minHeight: moderateScale(66),
-        flexDirection: "row",
-        borderTopWidth: StyleSheet.hairlineWidth,
-        borderTopColor: "#e0e0e0",
-        paddingTop: vh(0.8),
-        paddingBottom: Math.min(bottomInset, moderateScale(6)) + vh(0.35),
-        paddingHorizontal: vw(2),
-        backgroundColor: "#ffffff",
-        zIndex: 4,
-        elevation: 4,
-      },
-      tabItem: {
-        flex: 1,
-        alignItems: "center",
-        justifyContent: "center",
-      },
-      tabIcon: {
-        width: moderateScale(32),
-        height: moderateScale(32),
-        resizeMode: "contain",
-      },
-      tabIconWrap: {
-        position: "relative",
-        alignItems: "center",
-        justifyContent: "center",
-      },
-      tabBadgeWrap: {
-        position: "absolute",
-        top: -moderateScale(4),
-        right: -moderateScale(10),
-        minWidth: moderateScale(18),
-        height: moderateScale(18),
-        borderRadius: 999,
-        backgroundColor: "#2cbbc1",
-        paddingHorizontal: moderateScale(4),
-        alignItems: "center",
-        justifyContent: "center",
-      },
-      tabBadgeText: {
-        color: "#ffffff",
-        fontSize: responsiveFont(10, 9, 11),
-        lineHeight: responsiveFont(12, 11, 13),
-        fontWeight: "600",
-      },
-      tabLabel: {
-        marginTop: vh(0.2),
-        color: "#9e9e9e",
-        fontSize: responsiveFont(15, 12, 16),
-        lineHeight: responsiveFont(19, 15, 20),
-        fontWeight: "400",
-      },
-      tabLabelActive: {
-        marginTop: vh(0.2),
-        color: "#2eb8c6",
-        fontSize: responsiveFont(15, 12, 16),
-        lineHeight: responsiveFont(19, 15, 20),
-        fontWeight: "500",
       },
       pagingIndicatorWrap: {
         position: "absolute",

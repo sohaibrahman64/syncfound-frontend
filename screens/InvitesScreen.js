@@ -40,6 +40,7 @@ import InvitesEmptyState from '../components/invites/InvitesEmptyState';
 import InvitesErrorState from '../components/invites/InvitesErrorState';
 import InvitesLoadingSkeleton from '../components/invites/InvitesLoadingSkeleton';
 import InvitesTabHeader from '../components/invites/InvitesTabHeader';
+import BottomNavigation from '../components/BottomNavigation';
 
 const TAB_INVITATIONS = 'invitations';
 const TAB_SENT = 'sent';
@@ -997,13 +998,6 @@ export default function InvitesScreen({ firebaseToken = '', onAuthExpired, onNav
     void loadTabData({ tabKey: activeTab, paginate: true });
   }, [activeTab, loadTabData]);
 
-  const navItems = useMemo(() => [
-    { key: 'invites', label: 'Invites', icon: require('../assets/invites-active.png'), active: true },
-    { key: 'sync', label: 'Sync', icon: require('../assets/sync-inactive.png'), active: false },
-    { key: 'chat', label: 'Chat', icon: require('../assets/chat-inactive.png'), active: false },
-    { key: 'profile', label: 'Profile', icon: require('../assets/profile-inactive.png'), active: false },
-  ], []);
-
   const shouldShowDetailActions = selectedProfile && activeTab !== TAB_SENT;
   const shouldShowSaveAction = activeTab !== TAB_INVITATIONS && activeTab !== TAB_PASSED;
   const trimmedAcceptanceMessage = String(acceptanceMessage || '').trim();
@@ -1409,14 +1403,12 @@ export default function InvitesScreen({ firebaseToken = '', onAuthExpired, onNav
           </View>
         )}
 
-        <View style={styles.bottomTabBar}>
-          {navItems.map((item) => (
-            <Pressable key={item.key} style={styles.navItem} onPress={() => onNavigate?.(item.key)}>
-              <Image source={item.icon} style={styles.navIcon} />
-              <Text style={item.active ? styles.navTextActive : styles.navText}>{item.label}</Text>
-            </Pressable>
-          ))}
-        </View>
+        <BottomNavigation
+          activeTab="invites"
+          onNavigate={onNavigate}
+          metrics={metrics}
+          bottomInset={insets.bottom}
+        />
 
         {inviteAcceptanceModal}
       </SafeAreaView>
@@ -1504,14 +1496,12 @@ export default function InvitesScreen({ firebaseToken = '', onAuthExpired, onNav
         </View>
       )}
 
-      <View style={styles.bottomTabBar}>
-        {navItems.map((item) => (
-          <Pressable key={item.key} style={styles.navItem} onPress={() => onNavigate?.(item.key)}>
-            <Image source={item.icon} style={styles.navIcon} />
-            <Text style={item.active ? styles.navTextActive : styles.navText}>{item.label}</Text>
-          </Pressable>
-        ))}
-      </View>
+      <BottomNavigation
+        activeTab="invites"
+        onNavigate={onNavigate}
+        metrics={metrics}
+        bottomInset={insets.bottom}
+      />
 
       {inviteAcceptanceModal}
     </SafeAreaView>
@@ -2353,46 +2343,6 @@ function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }, 
     paginationLoaderWrap: {
       paddingVertical: moderateScale(16),
       alignItems: 'center',
-    },
-    bottomTabBar: {
-      position: 'absolute',
-      left: 0,
-      right: 0,
-      bottom: bottomInset + vh(0.6),
-      minHeight: moderateScale(66),
-      flexDirection: 'row',
-      borderTopWidth: StyleSheet.hairlineWidth,
-      borderTopColor: '#e0e0e0',
-      paddingTop: vh(0.8),
-      paddingBottom: Math.min(bottomInset, moderateScale(6)) + vh(0.35),
-      paddingHorizontal: vw(2),
-      backgroundColor: '#ffffff',
-      zIndex: 4,
-      elevation: 4,
-    },
-    navItem: {
-      flex: 1,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    navIcon: {
-      width: moderateScale(32),
-      height: moderateScale(32),
-      resizeMode: 'contain',
-    },
-    navText: {
-      marginTop: vh(0.2),
-      color: '#9e9e9e',
-      fontSize: responsiveFont(15, 12, 16),
-      lineHeight: responsiveFont(19, 15, 20),
-      fontWeight: '400',
-    },
-    navTextActive: {
-      marginTop: vh(0.2),
-      color: '#2eb8c6',
-      fontSize: responsiveFont(15, 12, 16),
-      lineHeight: responsiveFont(19, 15, 20),
-      fontWeight: '500',
     },
   }));
 }

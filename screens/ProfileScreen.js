@@ -16,14 +16,8 @@ import { useResponsiveMetrics } from "../utils/responsive";
 import { BASE_URL_NO_API } from "../utils/Constants";
 import { getMyProfile } from "../utils/backendAuth";
 import { withPlatformFontStyles } from "../utils/typography";
+import BottomNavigation from "../components/BottomNavigation";
 import ProfileEditScreen from "./ProfileEditScreen";
-
-const TAB_ITEMS = [
-  { key: "invites", label: "Invites", icon: require("../assets/invites-inactive.png") },
-  { key: "sync", label: "Sync", icon: require("../assets/sync-inactive.png") },
-  { key: "chat", label: "Chat", icon: require("../assets/chat-inactive.png") },
-  { key: "profile", label: "Profile", icon: require("../assets/profile-active.png") },
-];
 
 function resolveProfileImageUrl(imageUri) {
   const value = String(imageUri || "").trim();
@@ -277,17 +271,23 @@ export default function ProfileScreen({
         </>
       )}
 
+      <BottomNavigation
+        activeTab="profile"
+        onNavigate={onNavigate}
+        metrics={metrics}
+        bottomInset={insets.bottom}
+      />
     </View>
   );
 }
 
-// Fix for duplicate bottom tab bar causing increased navigation bar height
 function createStyles(metrics, insets) {
   const scale = metrics.moderateScale;
   return withPlatformFontStyles({
     screen: {
       flex: 1,
       paddingTop: insets.top,
+      paddingBottom: scale(66) + insets.bottom,
       backgroundColor: "#f0eee5",
     },
     header: {
@@ -481,23 +481,5 @@ function createStyles(metrics, insets) {
       backgroundColor: "#2dbcc4",
     },
     retryButtonText: { color: "#fff", fontWeight: "600" },
-    bottomTabBar: {
-      minHeight: scale(82) + insets.bottom,
-      paddingBottom: insets.bottom,
-      paddingTop: scale(8),
-      backgroundColor: "#fff",
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "space-around",
-    },
-    tabItem: {
-      flex: 1,
-      alignItems: "center",
-      justifyContent: "center",
-      gap: scale(2),
-    },
-    tabIcon: { width: scale(38), height: scale(38) },
-    tabLabel: { color: "#aaa", fontSize: scale(16) },
-    tabLabelActive: { color: "#12b7c2" },
   });
 }

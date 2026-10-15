@@ -42,6 +42,8 @@ import { getCompanySizeSelectionLabel } from "./CompanySizeInterestLevelPicker";
 import WorkAuthorizationEditScreen, {
   getWorkAuthorizationLabel,
 } from "./WorkAuthorizationEditScreen";
+import ProfileEditPictureScreen from "./ProfileEditPictureScreen";
+import ProfilePhotoUploadScreen from "./ProfilePhotoUploadScreen";
 
 const PROMPT_SLOTS = ["prompt-1", "prompt-2", "prompt-3"];
 const MAX_INDUSTRY_SELECTION = 5;
@@ -2859,8 +2861,69 @@ function PriorStartupExperienceEditScreen({
   metrics,
 }) {
   const styles = createStyles(metrics);
-  const [selectedExperience, setSelectedExperience] =
-    useState(initialExperience);
+  const [selectedExperience, setSelectedExperience] = useState(initialExperience);
+  const [priorStartupOptions, setPriorStartupOptions] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState("");
+  const [retryKey, setRetryKey] = useState(0);
+  const PRIOR_STARTUP_EXPERIENCES_ENDPOINT = "/prior-startup-experiences";
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const fetchPriorStartupExperiences = async () => {
+      try {
+        setLoading(true);
+        setErrorMessage("");
+
+        const response = await apiFetch(PRIOR_STARTUP_EXPERIENCES_ENDPOINT, {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
+          },
+        });
+
+        if (!response.ok) {
+          throw new Error(`Failed to load prior startup experiences: ${response.status}`);
+        }
+
+        const payload = await response.json();
+        const list = Array.isArray(payload)
+          ? payload
+          : Array.isArray(payload?.data)
+            ? payload.data
+            : [];
+
+        // Extract experience field from each dictionary or use string if it's an array of strings
+        const options = list.map((item) =>
+          typeof item === "string" ? item : String(item?.label || item?.name || item?.prior_startup_experience || "").trim()
+        ).filter(Boolean);
+
+        if (isMounted) {
+          setPriorStartupOptions(options);
+          // Preserve initial selection if it's still valid in the new list
+          if (initialExperience && !options.includes(initialExperience)) {
+            // If initial experience is not in the new list, keep it anyway (fallback)
+            setSelectedExperience(initialExperience);
+          }
+        }
+      } catch {
+        if (isMounted) {
+          setErrorMessage("Could not load prior startup experiences. Please try again.");
+        }
+      } finally {
+        if (isMounted) {
+          setLoading(false);
+        }
+      }
+    };
+
+    fetchPriorStartupExperiences();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [retryKey, initialExperience]);
 
   return (
     <View style={styles.screen}>
@@ -2882,34 +2945,64 @@ function PriorStartupExperienceEditScreen({
         <View style={styles.headlineDoneAction} />
       </View>
       <View style={styles.priorExperienceContent}>
-        <Text style={styles.priorExperienceQuestion}>
-          Do you have any startup experience?
-        </Text>
-        {PRIOR_STARTUP_EXPERIENCE_OPTIONS.map((experience) => {
-          const selected = selectedExperience === experience;
-          return (
-            <Pressable
-              key={experience}
-              accessibilityRole="button"
-              accessibilityState={{ selected }}
-              onPress={() => setSelectedExperience(experience)}
-              style={[
-                styles.priorExperienceOption,
-                selected && styles.matchingGoalOptionSelected,
-              ]}
-            >
-              <Text
-                style={[
-                  styles.matchingGoalOptionText,
-                  styles.priorExperienceOptionText,
-                  selected && styles.matchingGoalOptionTextSelected,
-                ]}
-              >
-                {experience}
+        {loading ? (
+          <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
+            <ActivityIndicator
+              accessibilityLabel="Loading prior startup experiences"
+              size="large"
+              color="#2dbcc4"
+              style={{ marginBottom: 20 }}
+            />
+            <Text style={styles.profileFieldSubtitle}>Loading...</Text>
+          </View>
+        ) : errorMessage ? (
+          <View style={styles.screen}>
+            <View style={{ padding: 20 }}>
+              <Text style={styles.profileFieldSubtitle}>
+                {errorMessage}
               </Text>
-            </Pressable>
-          );
-        })}
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Retry"
+                onPress={() => setRetryKey((current) => current + 1)}
+                style={styles.profileFieldDone}
+              >
+                <Text style={styles.saveText}>Retry</Text>
+              </Pressable>
+            </View>
+          </View>
+        ) : (
+          <>
+            <Text style={styles.priorExperienceQuestion}>
+              Do you have any startup experience?
+            </Text>
+            {priorStartupOptions.map((option) => {
+              const selected = selectedExperience === option;
+              return (
+                <Pressable
+                  key={option}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected }}
+                  onPress={() => setSelectedExperience(option)}
+                  style={[
+                    styles.priorExperienceOption,
+                    selected && styles.matchingGoalOptionSelected,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.matchingGoalOptionText,
+                      styles.priorExperienceOptionText,
+                      selected && styles.matchingGoalOptionTextSelected,
+                    ]}
+                  >
+                    {option}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </>
+        )}
       </View>
     </View>
   );
@@ -3832,6 +3925,33 @@ export default function ProfileEditScreen({
   const [dateOfBirth, setDateOfBirth] = useState(() =>
     normalizeProfileDateOfBirth(initialDateOfBirth),
   );
+  const [profilePhoto, setProfilePhoto] = useState(() => ({
+    profileImageUri:
+      profileImageUrl ||
+      profile?.profileImageUri ||
+      profile?.profile_image_uri ||
+      "",
+    profileImageSource:
+      profile?.profileImageSource || profile?.profile_image_source || "",
+    profileImageRotation: Number(
+      profile?.profileImageRotation ?? profile?.profile_image_rotation ?? 0,
+    ),
+    profileImageScale: Number(
+      profile?.profileImageScale ?? profile?.profile_image_scale ?? 1,
+    ),
+    profileImageTranslateX: Number(
+      profile?.profileImageTranslateX ?? profile?.profile_image_translate_x ?? 0,
+    ),
+    profileImageTranslateY: Number(
+      profile?.profileImageTranslateY ?? profile?.profile_image_translate_y ?? 0,
+    ),
+    profileImageCropRect:
+      profile?.profileImageCropRect ?? profile?.profile_image_crop_rect ?? null,
+  }));
+  const [profilePhotoDraft, setProfilePhotoDraft] = useState({});
+  const [profilePhotoFlowStep, setProfilePhotoFlowStep] = useState("profile");
+  const [openProfilePhotoSourceMenu, setOpenProfilePhotoSourceMenu] =
+    useState(false);
   const [profileLocation, setProfileLocation] = useState(
     profile?.locationPreference ?? null,
   );
@@ -3839,6 +3959,10 @@ export default function ProfileEditScreen({
   const [schedulingLink, setSchedulingLink] = useState(undefined);
   const [profileExperiences, setProfileExperiences] = useState([]);
   const [profileEducation, setProfileEducation] = useState([]);
+  const [roleOptions, setRoleOptions] = useState([]);
+  const [loadingRoleOptions, setLoadingRoleOptions] = useState(true);
+  const [errorMessageRoleOptions, setErrorMessageRoleOptions] = useState("");
+  const [retryKeyRoleOptions, setRetryKeyRoleOptions] = useState(0);
   const locationSummary = getLocationSummary(profile, profileLocation);
   const profileScrollOffset = useRef(0);
   const editable = activeTab === "Edit";
@@ -3979,6 +4103,206 @@ export default function ProfileEditScreen({
     fetchUserSkills();
   }, [firebaseToken]);
 
+  useEffect(() => {
+    let isMounted = true;
+
+    const fetchRoleOptions = async () => {
+      try {
+        setLoadingRoleOptions(true);
+        setErrorMessageRoleOptions("");
+
+        const response = await apiFetch("/user-described-as", {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
+          },
+        });
+
+        if (!response.ok) {
+          throw new Error(`Failed to load role options: ${response.status}`);
+        }
+
+        const payload = await response.json();
+        const list = Array.isArray(payload)
+          ? payload
+          : Array.isArray(payload?.data)
+            ? payload.data
+            : [];
+
+        // Handle both string arrays and object arrays
+        let options = [];
+        if (list.length > 0) {
+          if (typeof list[0] === "string") {
+            // Array of strings
+            options = list.map((item) => String(item).trim()).filter(Boolean);
+          } else if (typeof list[0] === "object" && list[0] !== null) {
+            // Array of objects - try common field names based on the example
+            options = list
+              .map((item) => ({
+                id: item?.id,
+                described_as: String(item?.described_as || "").trim(),
+                icon: item?.icon || null,
+              }))
+              .filter(option => option.described_as !== "");
+          }
+        }
+
+        // Fallback to default options if API returns empty array
+        if (options.length === 0) {
+          options = [
+            { id: 1, described_as: "Founder", icon: "assets/bulb.png" },
+            { id: 2, described_as: "Talent", icon: "assets/star.png" },
+            { id: 3, described_as: "Both", icon: null },
+          ];
+        }
+
+        if (isMounted) {
+          setRoleOptions(options);
+          // Preserve initial selection if it's still valid in the new list
+          if (selectedRole && !options.map(opt => opt.described_as).includes(selectedRole)) {
+            // If initial role is not in the new list, keep it anyway (fallback)
+            // But we need to make sure selectedRole is valid, so we'll reset to first option if needed
+            if (options.length > 0) {
+              setSelectedRole(options[0].described_as);
+            }
+          }
+        }
+      } catch {
+        if (isMounted) {
+          // Fallback to default options on error
+          setRoleOptions([
+            { id: 1, described_as: "Founder", icon: "assets/bulb.png" },
+            { id: 2, described_as: "Talent", icon: "assets/star.png" },
+            { id: 3, described_as: "Both", icon: null },
+          ]);
+          // Preserve initial selection if it's still valid in the fallback list
+          const fallbackOptions = ["Founder", "Talent", "Both"];
+          if (
+            selectedRole &&
+            !fallbackOptions.includes(selectedRole)
+          ) {
+            setSelectedRole("Founder"); // Reset to default
+          }
+          setErrorMessageRoleOptions(
+            "Could not load role options. Please try again."
+          );
+        }
+      } finally {
+        if (isMounted) {
+          setLoadingRoleOptions(false);
+        }
+      }
+    };
+
+    fetchRoleOptions();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [retryKeyRoleOptions, selectedRole]);
+
+  if (profilePhotoFlowStep === "upload") {
+    return (
+      <ProfilePhotoUploadScreen
+        firebaseToken={firebaseToken}
+        initialLinkedinProfilePictureUrl={
+          profile?.linkedinProfilePreview?.profilePictureUrl ||
+          profile?.linkedin_profile_picture_url ||
+          ""
+        }
+        initialProfileImageUri={
+          profilePhotoDraft.pendingProfileImageUri ||
+          profilePhotoDraft.profileImageUri ||
+          profilePhoto.profileImageUri
+        }
+        initialProfileImageSource={
+          profilePhotoDraft.pendingProfileImageSource ||
+          profilePhotoDraft.profileImageSource ||
+          profilePhoto.profileImageSource
+        }
+        initialProfileImageRotation={
+          profilePhotoDraft.profileImageRotation ??
+          profilePhoto.profileImageRotation
+        }
+        initialProfileImageScale={
+          profilePhotoDraft.profileImageScale ?? profilePhoto.profileImageScale
+        }
+        initialProfileImageTranslateX={
+          profilePhotoDraft.profileImageTranslateX ??
+          profilePhoto.profileImageTranslateX
+        }
+        initialProfileImageTranslateY={
+          profilePhotoDraft.profileImageTranslateY ??
+          profilePhoto.profileImageTranslateY
+        }
+        initialProfileImageCropRect={
+          profilePhotoDraft.profileImageCropRect ??
+          profilePhoto.profileImageCropRect
+        }
+        profileEditTheme
+        openSourceMenuOnMount={openProfilePhotoSourceMenu}
+        onBack={() => {
+          setOpenProfilePhotoSourceMenu(false);
+          setProfilePhotoFlowStep("profile");
+        }}
+        onContinue={(fields) => {
+          if (fields?.pendingProfileImageUri) {
+            setProfilePhotoDraft((current) => ({ ...current, ...fields }));
+            setOpenProfilePhotoSourceMenu(false);
+            setProfilePhotoFlowStep("edit");
+            return;
+          }
+
+          setProfilePhoto((current) => ({ ...current, ...fields }));
+          setProfilePhotoDraft({});
+          setOpenProfilePhotoSourceMenu(false);
+          setProfilePhotoFlowStep("profile");
+        }}
+      />
+    );
+  }
+
+  if (profilePhotoFlowStep === "edit") {
+    return (
+      <ProfileEditPictureScreen
+        initialImageUri={
+          profilePhotoDraft.pendingProfileImageUri ||
+          profilePhotoDraft.profileImageUri ||
+          profilePhoto.profileImageUri
+        }
+        initialImageSource={
+          profilePhotoDraft.pendingProfileImageSource ||
+          profilePhotoDraft.profileImageSource ||
+          profilePhoto.profileImageSource
+        }
+        initialRotation={
+          profilePhotoDraft.profileImageRotation ?? profilePhoto.profileImageRotation
+        }
+        initialScale={
+          profilePhotoDraft.profileImageScale ?? profilePhoto.profileImageScale
+        }
+        initialTranslateX={
+          profilePhotoDraft.profileImageTranslateX ??
+          profilePhoto.profileImageTranslateX
+        }
+        initialTranslateY={
+          profilePhotoDraft.profileImageTranslateY ??
+          profilePhoto.profileImageTranslateY
+        }
+        initialCropRect={
+          profilePhotoDraft.profileImageCropRect ??
+          profilePhoto.profileImageCropRect
+        }
+        profileEditTheme
+        onBack={() => setProfilePhotoFlowStep("upload")}
+        onContinue={(fields) => {
+          setProfilePhotoDraft((current) => ({ ...current, ...fields }));
+          setProfilePhotoFlowStep("upload");
+        }}
+      />
+    );
+  }
+
   if (isEditingHeadline) {
     return (
       <HeadlineEditScreen
@@ -3996,7 +4320,7 @@ export default function ProfileEditScreen({
   if (isEditingIdea) {
     return (
       <IdeaEditScreen
-        initialValue={idea}
+        initialValue={profile?.startupIdea}
         onBack={() => setIsEditingIdea(false)}
         onDone={(value) => {
           setIdea(value);
@@ -4553,8 +4877,8 @@ export default function ProfileEditScreen({
             <View style={styles.photoWrap}>
               <Image
                 source={
-                  profileImageUrl
-                    ? { uri: profileImageUrl }
+                  profilePhoto.profileImageUri
+                    ? { uri: profilePhoto.profileImageUri }
                     : require("../assets/user.png")
                 }
                 style={styles.profilePhoto}
@@ -4565,6 +4889,11 @@ export default function ProfileEditScreen({
                   accessibilityRole="button"
                   accessibilityLabel="Edit photo"
                   style={styles.photoEditButton}
+                  onPress={() => {
+                    setProfilePhotoDraft({});
+                    setOpenProfilePhotoSourceMenu(true);
+                    setProfilePhotoFlowStep("upload");
+                  }}
                 >
                   <Image
                     source={require("../assets/edit.png")}
@@ -4593,35 +4922,63 @@ export default function ProfileEditScreen({
         <View style={styles.sectionBlock}>
           <Text style={styles.fieldLabel}>What Best Describes Me</Text>
           <View style={styles.roleOptions}>
-            {[
-              { label: "Founder", icon: "♙" },
-              { label: "Talent", icon: "☆" },
-              { label: "Both", icon: "" },
-            ].map((option) => (
-              <Pressable
-                key={option.label}
-                accessibilityRole="button"
-                accessibilityState={{ selected: selectedRole === option.label }}
-                disabled={!editable}
-                onPress={() => setSelectedRole(option.label)}
-                style={[
-                  styles.roleOption,
-                  selectedRole === option.label && styles.roleOptionActive,
-                ]}
-              >
-                {!!option.icon && (
-                  <Text style={styles.roleIcon}>{option.icon}</Text>
-                )}
-                <Text
-                  style={[
-                    styles.roleLabel,
-                    selectedRole === option.label && styles.roleLabelActive,
-                  ]}
-                >
-                  {option.label}
-                </Text>
-              </Pressable>
-            ))}
+            {loadingRoleOptions ? (
+              <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
+                <ActivityIndicator
+                  accessibilityLabel="Loading role options"
+                  size="large"
+                  color="#2dbcc4"
+                  style={{ marginBottom: 20 }}
+                />
+                <Text style={styles.profileFieldSubtitle}>Loading...</Text>
+              </View>
+            ) : errorMessageRoleOptions ? (
+              <View style={styles.screen}>
+                <View style={{ padding: 20 }}>
+                  <Text style={styles.profileFieldSubtitle}>
+                    {errorMessageRoleOptions}
+                  </Text>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Retry"
+                    onPress={() => setRetryKeyRoleOptions((current) => current + 1)}
+                    style={styles.profileFieldDone}
+                  >
+                    <Text style={styles.saveText}>Retry</Text>
+                  </Pressable>
+                </View>
+              </View>
+            ) : (
+              <>
+                {roleOptions.map((option) => (
+                  <Pressable
+                    key={option.described_as}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: selectedRole === option.described_as }}
+                    disabled={!editable}
+                    onPress={() => setSelectedRole(option.described_as)}
+                    style={[
+                      styles.roleOption,
+                      selectedRole === option.described_as && styles.roleOptionActive,
+                    ]}
+                  >
+                    {option.icon === "assets/bulb.png" ? (
+                      <Image source={require("../assets/bulb.png")} style={styles.roleIcon} />
+                    ) : option.icon === "assets/star.png" ? (
+                      <Image source={require("../assets/star.png")} style={styles.roleIcon} />
+                    ) : null}
+                    <Text
+                      style={[
+                        styles.roleLabel,
+                        selectedRole === option.described_as && styles.roleLabelActive,
+                      ]}
+                    >
+                      {option.described_as}
+                    </Text>
+                  </Pressable>
+                ))}
+              </>
+            )}
           </View>
           <Text style={styles.helperText}>
             You will be shown as a {selectedRole.toLowerCase()} on your profile
@@ -4639,7 +4996,7 @@ export default function ProfileEditScreen({
           >
             <Text style={styles.cardTitle}>I’m exploring</Text>
             <Text style={styles.ideaPreview}>
-              {idea || "Write your idea here"}
+              {profile?.startupIdea || "Write your idea here"}
             </Text>
           </Pressable>
         </View>
@@ -6361,7 +6718,7 @@ function createStyles(metrics) {
       borderRadius: scale(24),
     },
     roleOptionActive: { backgroundColor: "#e0e4e9" },
-    roleIcon: { color: "#292929", fontSize: scale(22) },
+    roleIcon: { width: scale(20), height: scale(20) },
     roleLabel: { color: "#111", fontSize: scale(15), fontWeight: "700" },
     roleLabelActive: { color: "#111" },
     helperText: {

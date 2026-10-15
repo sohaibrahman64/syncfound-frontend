@@ -87,11 +87,16 @@ export default function ProfilePhotoUploadScreen({
   initialProfileImageTranslateX = 0,
   initialProfileImageTranslateY = 0,
   initialProfileImageCropRect = null,
+  profileEditTheme = false,
+  openSourceMenuOnMount = false,
 }) {
   const metrics = useResponsiveMetrics();
   const insets = useSafeAreaInsets();
-  const styles = useMemo(() => createStyles(metrics, insets), [metrics, insets.top, insets.bottom]);
-  const [isDrawerVisible, setIsDrawerVisible] = useState(false);
+  const styles = useMemo(
+    () => createStyles(metrics, insets, profileEditTheme),
+    [metrics, insets.top, insets.bottom, profileEditTheme],
+  );
+  const [isDrawerVisible, setIsDrawerVisible] = useState(openSourceMenuOnMount);
   const [selectedImageUri, setSelectedImageUri] = useState(initialProfileImageUri);
   const [selectedImageSource, setSelectedImageSource] = useState(initialProfileImageSource);
   const [selectedImageOriginalUri, setSelectedImageOriginalUri] = useState(initialProfileImageUri);
@@ -383,7 +388,7 @@ export default function ProfilePhotoUploadScreen({
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.topAccent} />
+      {!profileEditTheme ? <View style={styles.topAccent} /> : null}
 
       <View style={styles.content}>
         <Pressable style={styles.backButton} onPress={onBack} hitSlop={10}>
@@ -425,7 +430,17 @@ export default function ProfilePhotoUploadScreen({
             </Pressable>
 
             {selectedImageUri ? (
-              <Pressable style={styles.editBadge} onPress={handleEditBadgePress} hitSlop={8}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Edit photo options"
+                style={styles.editBadge}
+                onPress={
+                  profileEditTheme
+                    ? () => setIsDrawerVisible(true)
+                    : handleEditBadgePress
+                }
+                hitSlop={8}
+              >
                 <Image source={require('../assets/edit.png')} style={styles.editBadgeIcon} />
               </Pressable>
             ) : null}
@@ -532,7 +547,9 @@ export default function ProfilePhotoUploadScreen({
 
             <Pressable style={styles.drawerRow} onPress={handleCameraSelection}>
               <Image source={require('../assets/take-photo.png')} style={styles.drawerIcon} />
-              <Text style={styles.drawerRowText}>Take a Picture</Text>
+              <Text style={styles.drawerRowText}>
+                {profileEditTheme ? 'Take A Picture' : 'Take a Picture'}
+              </Text>
             </Pressable>
 
             <View style={styles.rowDivider} />
@@ -558,16 +575,22 @@ export default function ProfilePhotoUploadScreen({
   );
 }
 
-function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }, insets = {}) {
+function createStyles(
+  { width, height, vw, vh, moderateScale, responsiveFont },
+  insets = {},
+  profileEditTheme = false,
+) {
   const isShortScreen = height < 760;
   const isNarrowScreen = width < 360;
   const topInset = insets?.top || 0;
   const bottomInset = insets?.bottom || 0;
+  const backgroundColor = profileEditTheme ? '#f0eee5' : '#f3f3f3';
+  const accentColor = profileEditTheme ? '#2dbcc4' : '#26c6d0';
 
   return StyleSheet.create(withPlatformFontStyles({
     container: {
       flex: 1,
-      backgroundColor: '#f3f3f3',
+      backgroundColor,
     },
     topAccent: {
       position: 'absolute',
@@ -575,7 +598,7 @@ function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }, 
       left: 0,
       width: vw(95),
       height: vh(1.2),
-      backgroundColor: '#26c6d0',
+      backgroundColor: accentColor,
       zIndex: 2,
     },
     content: {
@@ -614,7 +637,7 @@ function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }, 
       position: 'relative',
       alignItems: 'center',
       justifyContent: 'center',
-      backgroundColor: '#f3f3f3',
+      backgroundColor,
     },
     photoWrap: {
       position: 'relative',
@@ -625,12 +648,12 @@ function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }, 
       width: moderateScale(isShortScreen ? 200 : 250),
       height: moderateScale(isShortScreen ? 200 : 250),
       resizeMode: 'contain',
-      tintColor: '#26c6d0',
+      tintColor: accentColor,
     },
     uploadPictureButton: {
       minWidth: vw(isNarrowScreen ? 40 : 35),
       borderRadius: 999,
-      backgroundColor: '#31c6d5',
+      backgroundColor: profileEditTheme ? '#2dbcc4' : '#31c6d5',
       minHeight: moderateScale(isShortScreen ? 42 : 46),
       alignItems: 'center',
       justifyContent: 'center',
@@ -684,7 +707,7 @@ function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }, 
       width: isNarrowScreen ? '84%' : '80%',
       alignSelf: 'center',
       borderRadius: 999,
-      backgroundColor: '#31c6d5',
+      backgroundColor: profileEditTheme ? '#2dbcc4' : '#31c6d5',
       minHeight: moderateScale(isShortScreen ? 52 : 58),
       alignItems: 'center',
       justifyContent: 'center',
@@ -720,7 +743,7 @@ function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }, 
       borderRadius: 999,
       backgroundColor: '#ffffff',
       borderWidth: 2,
-      borderColor: '#26c6d0',
+      borderColor: accentColor,
       alignItems: 'center',
       justifyContent: 'center',
     },
@@ -728,7 +751,7 @@ function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }, 
       width: moderateScale(isShortScreen ? 18 : 20),
       height: moderateScale(isShortScreen ? 18 : 20),
       resizeMode: 'contain',
-      tintColor: '#26c6d0',
+      tintColor: accentColor,
     },
     selectedSourceText: {
       color: '#5e5e5e',
@@ -757,7 +780,7 @@ function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }, 
     drawerContainer: {
       borderTopLeftRadius: moderateScale(28),
       borderTopRightRadius: moderateScale(28),
-      backgroundColor: '#f3f3f3',
+      backgroundColor,
       paddingTop: vh(1.8),
       paddingBottom: bottomInset + vh(2.2),
       paddingHorizontal: vw(6),
@@ -803,7 +826,7 @@ function createStyles({ width, height, vw, vh, moderateScale, responsiveFont }, 
       width: moderateScale(isShortScreen ? 35 : 39),
       height: moderateScale(isShortScreen ? 35 : 39),
       resizeMode: 'contain',
-      tintColor: '#26c6d0',
+      tintColor: accentColor,
     },
     drawerLinkedinIcon: {
       width: moderateScale(isShortScreen ? 36 : 40),

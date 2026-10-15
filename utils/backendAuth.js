@@ -1,5 +1,7 @@
 import { BASE_URL } from "./Constants";
 import { apiFetch } from "./apiClient";
+import { fetch as expoFetch } from "expo/fetch";
+import { File } from "expo-file-system";
 
 function normalizeApiBaseUrl(value) {
   const text = String(value || "")
@@ -154,6 +156,27 @@ function buildUploadFileName(contentType) {
   if (normalizedType.includes("png")) return "profile-photo.png";
   if (normalizedType.includes("webp")) return "profile-photo.webp";
   return "profile-photo.jpg";
+}
+
+function getImageMimeTypeFromUri(uri) {
+  const extension = String(uri || "")
+    .split(/[?#]/, 1)[0]
+    .split(".")
+    .pop()
+    .toLowerCase();
+
+  const mimeTypes = {
+    avif: "image/avif",
+    gif: "image/gif",
+    heic: "image/heic",
+    heif: "image/heif",
+    jpeg: "image/jpeg",
+    jpg: "image/jpeg",
+    png: "image/png",
+    webp: "image/webp",
+  };
+
+  return mimeTypes[extension] || "image/jpeg";
 }
 
 function resolveToAbsoluteUrl(value) {
@@ -1276,17 +1299,30 @@ export async function uploadProfileImage(imageUri, firebaseToken) {
     throw new Error("No image URI provided for upload.");
   }
 
-  const fileResponse = await fetch(normalizedUri);
-  if (!fileResponse.ok) {
-    throw new Error("Could not read the selected image for upload.");
+  let uploadFile;
+  let contentType;
+
+  if (/^https?:\/\//i.test(normalizedUri)) {
+    const fileResponse = await expoFetch(normalizedUri);
+    if (!fileResponse.ok) {
+      throw new Error("Could not read the selected image for upload.");
+    }
+
+    uploadFile = await fileResponse.blob();
+    contentType = uploadFile?.type || "image/jpeg";
+  } else {
+    uploadFile = new File(normalizedUri);
+    if (!uploadFile.exists) {
+      throw new Error("Could not read the selected image for upload.");
+    }
+
+    contentType = uploadFile.type || getImageMimeTypeFromUri(normalizedUri);
   }
 
-  const blob = await fileResponse.blob();
-  const contentType = blob?.type || "image/jpeg";
   const fileName = buildUploadFileName(contentType);
 
   const formData = new FormData();
-  formData.append("file", blob, fileName);
+  formData.append("file", uploadFile, fileName);
 
   const headers = {};
   if (firebaseToken) {
