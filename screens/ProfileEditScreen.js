@@ -44,6 +44,7 @@ import WorkAuthorizationEditScreen, {
 } from "./WorkAuthorizationEditScreen";
 import ProfileEditPictureScreen from "./ProfileEditPictureScreen";
 import ProfilePhotoUploadScreen from "./ProfilePhotoUploadScreen";
+import ProfilePreview from "../components/profile/ProfilePreview";
 
 const PROMPT_SLOTS = ["prompt-1", "prompt-2", "prompt-3"];
 const MAX_INDUSTRY_SELECTION = 5;
@@ -3732,10 +3733,30 @@ export default function ProfileEditScreen({
 }) {
   const metrics = useResponsiveMetrics();
   const styles = createStyles(metrics);
+  const initialStartupExperience = getProfileTextList(
+    profile?.startupExperiences || profile?.startup_experiences || profile?.startup_experience,
+  ).join(", ");
+  const initialRole = profile?.userRole || profile?.user_role || profile?.role;
   const [activeTab, setActiveTab] = useState("Edit");
-  const [selectedRole, setSelectedRole] = useState("Founder");
-  const [headline, setHeadline] = useState("");
-  const [idea, setIdea] = useState("");
+  const [selectedRole, setSelectedRole] = useState(() => {
+    if (typeof initialRole === "string" && initialRole.trim()) {
+      return initialRole.trim();
+    }
+    if (initialRole && typeof initialRole === "object") {
+      const roleLabel =
+        initialRole.described_as || initialRole.label || initialRole.name;
+      if (typeof roleLabel === "string" && roleLabel.trim()) {
+        return roleLabel.trim();
+      }
+    }
+    return "Founder";
+  });
+  const selectedRoleLabel =
+    typeof selectedRole === "string" && selectedRole.trim()
+      ? selectedRole.trim()
+      : "Founder";
+  const [headline, setHeadline] = useState(profile?.headline || profile?.title || "");
+  const [idea, setIdea] = useState(profile?.startupIdea || profile?.startup_idea || "");
   const [isEditingHeadline, setIsEditingHeadline] = useState(false);
   const [isEditingIdea, setIsEditingIdea] = useState(false);
   const [editingPromptIndex, setEditingPromptIndex] = useState(null);
@@ -3773,13 +3794,13 @@ export default function ProfileEditScreen({
   );
   const [editingProfileField, setEditingProfileField] = useState("");
   const [matchingGoal, setMatchingGoal] = useState(
-    "Have some ideas but open to exploring",
+    profile?.matchingGoal || profile?.matching_goal || "Have some ideas but open to exploring",
   );
   const [commitmentLevel, setCommitmentLevel] = useState(
-    "Ready to go full-time with the right cofounder",
+    profile?.timeCommitment || profile?.time_commitment || "Ready to go full-time with the right cofounder",
   );
   const [priorStartupExperience, setPriorStartupExperience] = useState(
-    "No prior startup experience",
+    initialStartupExperience || "No prior startup experience",
   );
   const [founderCount, setFounderCount] = useState(0);
   const [selectedSkills, setSelectedSkills] = useState([]);
@@ -4129,23 +4150,24 @@ export default function ProfileEditScreen({
             ? payload.data
             : [];
 
-        // Handle both string arrays and object arrays
-        let options = [];
-        if (list.length > 0) {
-          if (typeof list[0] === "string") {
-            // Array of strings
-            options = list.map((item) => String(item).trim()).filter(Boolean);
-          } else if (typeof list[0] === "object" && list[0] !== null) {
-            // Array of objects - try common field names based on the example
-            options = list
-              .map((item) => ({
-                id: item?.id,
-                described_as: String(item?.described_as || "").trim(),
-                icon: item?.icon || null,
-              }))
-              .filter(option => option.described_as !== "");
-          }
-        }
+        // Normalize string and object responses to the same option shape.
+        let options = list
+          .map((item, index) => {
+            const describedAs =
+              typeof item === "string"
+                ? item
+                : item && typeof item === "object"
+                  ? item.described_as || item.label || item.name || ""
+                  : "";
+
+            return {
+              id: item && typeof item === "object" ? item.id ?? index + 1 : index + 1,
+              described_as:
+                typeof describedAs === "string" ? describedAs.trim() : "",
+              icon: item && typeof item === "object" ? item.icon || null : null,
+            };
+          })
+          .filter((option) => option.described_as !== "");
 
         // Fallback to default options if API returns empty array
         if (options.length === 0) {
@@ -4158,13 +4180,15 @@ export default function ProfileEditScreen({
 
         if (isMounted) {
           setRoleOptions(options);
-          // Preserve initial selection if it's still valid in the new list
-          if (selectedRole && !options.map(opt => opt.described_as).includes(selectedRole)) {
-            // If initial role is not in the new list, keep it anyway (fallback)
-            // But we need to make sure selectedRole is valid, so we'll reset to first option if needed
-            if (options.length > 0) {
-              setSelectedRole(options[0].described_as);
-            }
+          const matchingOption = options.find(
+            (option) =>
+              option.described_as.toLowerCase() ===
+              selectedRoleLabel.toLowerCase(),
+          );
+          if (matchingOption) {
+            setSelectedRole(matchingOption.described_as);
+          } else if (options.length > 0) {
+            setSelectedRole(options[0].described_as);
           }
         }
       } catch {
@@ -4177,10 +4201,7 @@ export default function ProfileEditScreen({
           ]);
           // Preserve initial selection if it's still valid in the fallback list
           const fallbackOptions = ["Founder", "Talent", "Both"];
-          if (
-            selectedRole &&
-            !fallbackOptions.includes(selectedRole)
-          ) {
+          if (!fallbackOptions.includes(selectedRoleLabel)) {
             setSelectedRole("Founder"); // Reset to default
           }
           setErrorMessageRoleOptions(
@@ -4752,16 +4773,16 @@ export default function ProfileEditScreen({
   }
 
   const backgroundSections =
-    selectedRole === "Both"
+    selectedRoleLabel === "Both"
       ? [
           { title: "My Background as a Founder", rows: BACKGROUND_ROWS },
           { title: "My Background as a Talent", rows: TALENT_BACKGROUND_ROWS },
         ]
       : [
           {
-            title: `My Background as a ${selectedRole === "Talent" ? "Talent" : "Founder"}`,
+            title: `My Background as a ${selectedRoleLabel === "Talent" ? "Talent" : "Founder"}`,
             rows:
-              selectedRole === "Talent"
+              selectedRoleLabel === "Talent"
                 ? TALENT_BACKGROUND_ROWS
                 : BACKGROUND_ROWS,
           },
@@ -4817,6 +4838,100 @@ export default function ProfileEditScreen({
     .join(", ");
   const workAuthorizationSummary = getWorkAuthorizationLabel(workAuthorization);
 
+  const previewDisplayName = [
+    profileName?.firstName ?? profile?.firstName ?? profile?.first_name,
+    profileName?.lastName ?? profile?.lastName ?? profile?.last_name,
+  ]
+    .map((part) => String(part || "").trim())
+    .filter(Boolean)
+    .join(" ") || String(profile?.displayName || profile?.full_name || profile?.name || "Your Profile").trim();
+  const previewLocationText = getProfileLocationText(profile, profileLocation);
+  const previewLocationPreference = getLocationPreferenceText(profile, profileLocation);
+  const previewLinkedinUrl = linkedinUrl || profile?.linkedinUrl || profile?.linkedin_url || "";
+  const previewSummary = [
+    headline || bioExperience.title || profile?.title || profile?.headline,
+    bioExperience.bio || profile?.bio,
+  ]
+    .map((part) => String(part || "").trim())
+    .filter((part, index, values) => part && values.indexOf(part) === index)
+    .join(" | ");
+  const previewIdea =
+    idea || bioExperience.startupIdea || profile?.startupIdea || profile?.startup_idea || "";
+  const previewAge = profile?.age
+    ? `${profile.age} years old`
+    : dateOfBirth && calculateProfileAge(dateOfBirth) !== null
+      ? `${calculateProfileAge(dateOfBirth)} years old`
+      : "";
+  const previewRoleTags = selectedSkills.length
+    ? selectedSkills
+        .map((value, index) => {
+          const option = skillOptions.find((item) => String(item.value) === String(value));
+          if (option?.label) return option.label;
+          if (/^\d+$/.test(String(value))) return initialSkills[index] || "";
+          return String(value || "").trim();
+        })
+        .filter(Boolean)
+    : initialSkills.length
+      ? initialSkills
+      : getProfileTextList(profile?.roleTags || profile?.role_tags);
+  const industryValues = selectedIndustries.length
+    ? selectedIndustries
+    : profile?.industries || profile?.industryInterests || profile?.industry_interests || [];
+  const previewIndustries = getProfileTextList(industryValues)
+    .map((value) => {
+      const option = industryOptions.find((item) => String(item.value) === String(value));
+      if (option?.label) return option.label;
+      return /^\d+$/.test(String(value)) ? "" : value;
+    })
+    .filter(Boolean);
+  const storedStartupExperiences = getProfileTextList(
+    profile?.startupExperiences || profile?.startup_experiences || profile?.startup_experience,
+  );
+  const previewStartupExperiences = storedStartupExperiences.length
+    && priorStartupExperience === "No prior startup experience"
+    ? storedStartupExperiences
+    : priorStartupExperience
+      ? [priorStartupExperience]
+      : storedStartupExperiences;
+  const storedWorkPreferences = getProfileTextList(
+    profile?.workPreferences || profile?.work_preferences || profile?.work_preference,
+  );
+  const previewWorkPreferences = storedWorkPreferences.length
+    ? storedWorkPreferences
+    : jobSearchProfile.workTypes.map((workType) =>
+        workType === "Full Time" ? "Full-time" : workType === "Part Time" ? "Part-time" : workType,
+      );
+  const previewFounderRows = [
+    {
+      icon: require("../assets/search.png"),
+      value: String(profile?.matchingGoal || profile?.matching_goal || matchingGoal || "").trim(),
+    },
+    {
+      icon: require("../assets/teamwork.png"),
+      value: String(profile?.timeCommitment || profile?.time_commitment || commitmentLevel || "").trim(),
+    },
+    {
+      icon: require("../assets/internship.png"),
+      value: previewRoleTags.join(", "),
+    },
+    { icon: require("../assets/user.png"), value: previewAge },
+  ].filter((row) => String(row.value || "").trim());
+  const previewPrompts = getProfilePreviewPrompts(profile, promptTitles, promptAnswers);
+  const previewExperiences = profileExperiences.length
+    ? profileExperiences
+    : getProfileItems(
+        profile?.linkedinExperiences || profile?.linkedin_experiences || profile?.experiences,
+      );
+  const previewEducation = profileEducation.length
+    ? profileEducation
+    : getProfileItems(
+        profile?.educationEntries || profile?.education_details || profile?.education,
+      );
+  const profileIntentBadge =
+    profile?.intentBadge ||
+    profile?.intent_badge ||
+    (selectedRoleLabel === "Talent" ? "Open to work" : "Open to founding");
+
   return (
     <View style={styles.screen}>
       <View style={styles.header}>
@@ -4845,7 +4960,10 @@ export default function ProfileEditScreen({
             key={tab}
             accessibilityRole="button"
             accessibilityState={{ selected: activeTab === tab }}
-            onPress={() => setActiveTab(tab)}
+            onPress={() => {
+              profileScrollOffset.current = 0;
+              setActiveTab(tab);
+            }}
             style={styles.modeTab}
           >
             <Text
@@ -4861,6 +4979,7 @@ export default function ProfileEditScreen({
       </View>
 
       <ScrollView
+        key={activeTab}
         testID="profile-edit-scroll"
         contentOffset={{ x: 0, y: profileScrollOffset.current }}
         onScroll={(event) => {
@@ -4871,6 +4990,8 @@ export default function ProfileEditScreen({
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
       >
+        {editable ? (
+          <>
         <View style={styles.photoHeadlineRow}>
           <View style={styles.photoColumn}>
             <Text style={styles.fieldLabel}>My Photo</Text>
@@ -4954,12 +5075,12 @@ export default function ProfileEditScreen({
                   <Pressable
                     key={option.described_as}
                     accessibilityRole="button"
-                    accessibilityState={{ selected: selectedRole === option.described_as }}
+                    accessibilityState={{ selected: selectedRoleLabel === option.described_as }}
                     disabled={!editable}
                     onPress={() => setSelectedRole(option.described_as)}
                     style={[
                       styles.roleOption,
-                      selectedRole === option.described_as && styles.roleOptionActive,
+                      selectedRoleLabel === option.described_as && styles.roleOptionActive,
                     ]}
                   >
                     {option.icon === "assets/bulb.png" ? (
@@ -4970,7 +5091,7 @@ export default function ProfileEditScreen({
                     <Text
                       style={[
                         styles.roleLabel,
-                        selectedRole === option.described_as && styles.roleLabelActive,
+                        selectedRoleLabel === option.described_as && styles.roleLabelActive,
                       ]}
                     >
                       {option.described_as}
@@ -4981,7 +5102,7 @@ export default function ProfileEditScreen({
             )}
           </View>
           <Text style={styles.helperText}>
-            You will be shown as a {selectedRole.toLowerCase()} on your profile
+            You will be shown as a {selectedRoleLabel.toLowerCase()} on your profile
           </Text>
         </View>
 
@@ -5244,9 +5365,170 @@ export default function ProfileEditScreen({
             styles={styles}
           />
         </View>
+          </>
+        ) : (
+          <ProfilePreview
+            metrics={metrics}
+            displayName={previewDisplayName}
+            photoUri={profilePhoto.profileImageUri || profileImageUrl}
+            linkedinUrl={previewLinkedinUrl}
+            locationText={previewLocationText}
+            locationPreferenceText={previewLocationPreference}
+            badges={[
+              {
+                label: profileIntentBadge,
+                style: "foundingBadge",
+                textStyle: "darkBadgeText",
+              },
+              { label: "New", style: "newBadge", textStyle: "tealBadgeText" },
+              {
+                label: "Active Today",
+                style: "activeBadge",
+                textStyle: "greenBadgeText",
+              },
+            ]}
+            summary={previewSummary}
+            ideaTitle="I'm exploring"
+            idea={previewIdea}
+            founderTitle={`As a ${selectedRoleLabel === "Both" ? "founder and talent" : selectedRoleLabel.toLowerCase()}, I am...`}
+            founderRows={previewFounderRows}
+            industries={previewIndustries}
+            startupExperiences={previewStartupExperiences}
+            workPreferences={previewWorkPreferences}
+            prompts={previewPrompts}
+            motivation={profile?.motivation}
+            superpower={profile?.superpower || profile?.strength}
+            experiences={previewExperiences}
+            experienceSummary={profile?.experienceSummary || profile?.experience_summary || bioExperienceSummary}
+            education={previewEducation}
+          />
+        )}
       </ScrollView>
     </View>
   );
+}
+
+function getProfileTextList(value) {
+  const values = Array.isArray(value)
+    ? value
+    : typeof value === "string"
+      ? value.split(/[,;\n]/)
+      : [];
+
+  return values
+    .map((item) => {
+      if (item && typeof item === "object") {
+        return String(
+          item.label ||
+            item.name ||
+            item.industry_name ||
+            item.skill_name ||
+            item.title ||
+            item.value ||
+            "",
+        ).trim();
+      }
+      return String(item ?? "").trim();
+    })
+    .filter(Boolean);
+}
+
+function getProfileItems(value) {
+  return Array.isArray(value) ? value.filter((item) => item && typeof item === "object") : [];
+}
+
+function getProfilePreviewPrompts(profile, promptTitles, promptAnswers) {
+  const savedPrompts = [
+    profile?.prompts,
+    profile?.profilePrompts,
+    profile?.profile_prompts,
+    profile?.promptResponses,
+    profile?.prompt_responses,
+    profile?.user_prompts,
+  ].find(Array.isArray) || [];
+  const combinedPrompts = [
+    ...savedPrompts.map((prompt) => ({
+      title:
+        prompt?.prompt_title ||
+        prompt?.title ||
+        prompt?.question_text ||
+        prompt?.question ||
+        prompt?.prompt ||
+        prompt?.label ||
+        "",
+      answer:
+        prompt?.answer ||
+        prompt?.response ||
+        prompt?.answer_text ||
+        prompt?.prompt_answer ||
+        prompt?.content ||
+        "",
+    })),
+    ...promptTitles.map((title, index) => ({
+      title,
+      answer: promptAnswers[index],
+    })),
+  ].filter((prompt) => String(prompt.title || prompt.answer || "").trim());
+
+  const byTitle = new Map();
+  combinedPrompts.forEach((prompt, index) => {
+    const title = String(prompt.title || "").trim();
+    const answer = String(prompt.answer || "").trim();
+    const key = title.toLowerCase() || `prompt-${index}`;
+    const previous = byTitle.get(key);
+    byTitle.set(key, {
+      title: title || previous?.title || "",
+      answer: answer || previous?.answer || "",
+    });
+  });
+
+  return [...byTitle.values()].filter((prompt) => prompt.title || prompt.answer);
+}
+
+function getProfileLocationText(profile, editedLocation) {
+  const locationDetails = profile?.locationDetails || profile?.location_details || {};
+  const city =
+    editedLocation?.city ??
+    editedLocation?.selected_city ??
+    locationDetails.selected_city ??
+    profile?.selected_city ??
+    "";
+  const state =
+    editedLocation?.state ??
+    editedLocation?.selected_state ??
+    locationDetails.selected_state ??
+    profile?.selected_state ??
+    "";
+  const country =
+    editedLocation?.country ??
+    editedLocation?.selected_country ??
+    locationDetails.selected_country ??
+    profile?.selected_country ??
+    "";
+
+  return (
+    [city, state, country].map((part) => String(part || "").trim()).filter(Boolean).join(", ") ||
+    String(profile?.locationText || profile?.location_text || profile?.location || "").trim()
+  );
+}
+
+function getLocationPreferenceText(profile, editedLocation) {
+  const savedSummary = String(
+    profile?.locationPreferenceText ||
+      profile?.location_preference_text ||
+      getLocationSummary(profile, editedLocation),
+  ).toLowerCase();
+  const preferences = getProfileTextList(
+    profile?.workPreferences || profile?.work_preferences || profile?.work_preference,
+  ).join(" ").toLowerCase();
+  const source = `${savedSummary} ${preferences}`;
+  const isRemote = /remote|work from anywhere/.test(source);
+  const isRelocating = /relocat/.test(source);
+
+  if (isRemote && isRelocating) return "Open to relocate or remote work";
+  if (isRemote) return "Open to remote work";
+  if (isRelocating) return "Open to relocate";
+  return "";
 }
 
 function getLocationSummary(profile, editedLocation) {
