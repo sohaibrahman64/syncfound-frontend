@@ -1387,6 +1387,56 @@ function ProfileRadioOption({ label, selected, onPress, styles }) {
   );
 }
 
+function getLocationLabel(value) {
+  if (value && typeof value === "object") {
+    return String(
+      value.city_name ?? value.label ?? value.name ?? value.city ?? "",
+    ).trim();
+  }
+  return String(value ?? "").trim();
+}
+
+function getLocationOptionId(value, keys) {
+  if (value && typeof value === "object") {
+    for (const key of keys) {
+      const id = toOptionalNumber(value[key]);
+      if (id !== null) return id;
+    }
+    return null;
+  }
+  return toOptionalNumber(value);
+}
+
+function findInitialCity(cities, cityValue) {
+  if (!Array.isArray(cities)) return null;
+
+  const cityId = getLocationOptionId(cityValue, [
+    "city_id",
+    "id",
+    "city_code",
+    "code",
+    "value",
+  ]);
+  const cityLabel = getLocationLabel(cityValue).toLocaleLowerCase();
+
+  return (
+    cities.find((city) => {
+      const candidateId = getLocationOptionId(city, [
+        "city_id",
+        "id",
+        "city_code",
+        "code",
+        "value",
+      ]);
+      const candidateLabel = getLocationLabel(city).toLocaleLowerCase();
+      return (
+        (cityId !== null && candidateId === cityId) ||
+        (cityLabel && candidateLabel === cityLabel)
+      );
+    }) ?? null
+  );
+}
+
 function LocationProfileEditScreen({
   initialLocation,
   locationPreferenceQuestions = [],
@@ -1395,7 +1445,40 @@ function LocationProfileEditScreen({
   metrics,
 }) {
   const styles = createStyles(metrics);
-  const [city, setCity] = useState(initialLocation?.city || "");
+  const initialCityValue =
+    initialLocation?.city ?? initialLocation?.selected_city ?? "";
+  const initialCityRecord = findInitialCity(initialCities, initialCityValue);
+  const [city, setCity] = useState(getLocationLabel(initialCityValue));
+  const [cityId, setCityId] = useState(
+    getLocationOptionId(
+      initialLocation?.cityId ??
+        initialLocation?.city_id ??
+        initialLocation?.selected_city_id ??
+        initialCityValue,
+      ["city_id", "id", "city_code", "code", "value"],
+    ) ??
+      getLocationOptionId(initialCityRecord, [
+        "city_id",
+        "id",
+        "city_code",
+        "code",
+        "value",
+      ]),
+  );
+  const [countryId, setCountryId] = useState(
+    getLocationOptionId(
+      initialLocation?.countryId ??
+        initialLocation?.country_id ??
+        initialLocation?.selected_country_id ??
+        initialLocation?.country ??
+        initialLocation?.selected_country,
+      ["country_id", "id"],
+    ) ??
+      getLocationOptionId(initialCityValue, ["country_id", "countryId"]) ??
+      getLocationOptionId(initialCityValue?.country, ["country_id", "id"]) ??
+      getLocationOptionId(initialCityRecord, ["country_id", "countryId"]) ??
+      getLocationOptionId(initialCityRecord?.country, ["country_id", "id"]),
+  );
   const [isPickingCity, setIsPickingCity] = useState(false);
   const [openToRemote, setOpenToRemote] = useState(
     initialLocation.openToRemote,
@@ -1518,6 +1601,8 @@ function LocationProfileEditScreen({
 
     onDone({
       city: city.trim(),
+      cityId,
+      countryId,
       openToRemote,
       workPreference,
       willingToRelocate,
@@ -1546,6 +1631,21 @@ function LocationProfileEditScreen({
         onBack={() => setIsPickingCity(false)}
         onSelectCity={(selectedCity) => {
           setCity(selectedCity.label);
+          setCityId(
+            getLocationOptionId(selectedCity, ["cityId"]) ??
+            getLocationOptionId(selectedCity, [
+              "city_id",
+              "id",
+              "city_code",
+              "code",
+              "value",
+            ]),
+          );
+          setCountryId(
+            getLocationOptionId(selectedCity, ["country_id", "countryId"]) ??
+              getLocationOptionId(selectedCity.country, ["country_id", "id"]) ??
+              countryId,
+          );
           setIsPickingCity(false);
         }}
       />
@@ -2369,7 +2469,9 @@ function toPromptOption(item) {
           item?.name ||
           "",
   ).trim();
-  return text ? { id: item?.id ?? text, text } : null;
+  return text
+    ? { id: item?.prompt_id ?? item?.id ?? text, text }
+    : null;
 }
 
 function WrittenPromptEditScreen({
@@ -3723,6 +3825,402 @@ function EquitySplitEditScreen({
   );
 }
 
+function getProfilePromptEntries(profile) {
+  const savedPrompts = [
+    profile?.userPrompts,
+    profile?.user_prompts,
+    profile?.prompts,
+    profile?.profilePrompts,
+    profile?.profile_prompts,
+    profile?.promptResponses,
+    profile?.prompt_responses,
+  ].find(Array.isArray) || [];
+
+  return PROMPT_SLOTS.map((_, index) => {
+    const prompt = savedPrompts[index] || {};
+    const promptValue =
+      prompt?.prompt_name ||
+      prompt?.prompt_title ||
+      prompt?.title ||
+      prompt?.question_text ||
+      prompt?.question ||
+      prompt?.prompt_text ||
+      prompt?.prompt ||
+      prompt?.label ||
+      "";
+    const rawPromptId = prompt?.prompt;
+    const promptId =
+      prompt?.prompt_id ??
+      prompt?.promptId ??
+      prompt?.id ??
+      (toOptionalNumber(rawPromptId) !== null
+        ? rawPromptId
+        : toOptionalNumber(promptValue) !== null
+          ? promptValue
+          : null);
+
+    return {
+      title: String(promptValue || "").trim(),
+      id: promptId,
+      answer: String(
+        prompt?.answer ||
+          prompt?.response ||
+          prompt?.answer_text ||
+          prompt?.prompt_answer ||
+          prompt?.content ||
+          "",
+      ),
+    };
+  });
+}
+
+function toOptionalNumber(value) {
+  const candidate =
+    value && typeof value === "object"
+      ? value.id ??
+        value.prompt_id ??
+        value.skill_id ??
+        value.industry_id ??
+        value.user_described_as_id ??
+        value.matching_goal_id ??
+        value.commitment_level_id ??
+        value.prior_startup_experience_id ??
+        value.equity_split_id ??
+        value.work_authorization_id ??
+        value.authorization_id ??
+        value.cash_equity_expectation_id ??
+        value.expected_minimum_salary_id ??
+        value.salary_duration_id ??
+        value.currency_id ??
+        value.company_size_interest_level_id ??
+        value.interest_level_id ??
+        value.funding_stage_id ??
+        value.risk_appetite_id ??
+        value.employment_type_id ??
+        value.primary_role_id ??
+        value.secondary_role_id ??
+        value.location_type_id ??
+        value.value ??
+        value.answer ??
+        null
+      : value;
+  if (candidate === undefined || candidate === null || candidate === "") {
+    return null;
+  }
+
+  const parsed = Number(candidate);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function getOptionLabel(item, labelKeys) {
+  if (typeof item === "string" || typeof item === "number") {
+    return String(item).trim();
+  }
+
+  const value = labelKeys.map((key) => item?.[key]).find(
+    (candidate) => candidate !== undefined && candidate !== null && candidate !== "",
+  );
+  return String(value ?? "").trim();
+}
+
+function getOptionId(item, idKeys, index) {
+  if (typeof item === "string" || typeof item === "number") {
+    return index + 1;
+  }
+
+  const value = idKeys.map((key) => item?.[key]).find(
+    (candidate) => candidate !== undefined && candidate !== null && candidate !== "",
+  );
+  return toOptionalNumber(value) ?? index + 1;
+}
+
+function extractOptionList(payload, listKeys = []) {
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload?.data)) return payload.data;
+
+  const data = payload?.data && typeof payload.data === "object"
+    ? payload.data
+    : payload;
+  for (const key of listKeys) {
+    if (Array.isArray(data?.[key])) return data[key];
+  }
+
+  const arrayValue = Object.values(data || {}).find(Array.isArray);
+  return arrayValue || [];
+}
+
+async function resolveOptionId({
+  path,
+  value,
+  token,
+  labelKeys,
+  idKeys,
+  listKeys,
+  fallbackLabels = [],
+}) {
+  const directId = toOptionalNumber(value);
+  if (directId !== null) return directId;
+
+  const targetLabel = getOptionLabel(value, labelKeys).toLocaleLowerCase();
+  if (!targetLabel) return null;
+
+  try {
+    const headers = token
+      ? { Authorization: `Bearer ${token}` }
+      : undefined;
+    const response = await apiFetch(path, {
+      method: "GET",
+      headers,
+    });
+    if (!response.ok) throw new Error(`Option lookup failed: ${response.status}`);
+
+    const payload = await response.json();
+    const options = extractOptionList(payload, listKeys);
+    const matchedIndex = options.findIndex(
+      (item) =>
+        getOptionLabel(item, labelKeys).toLocaleLowerCase() === targetLabel,
+    );
+    if (matchedIndex >= 0) {
+      return getOptionId(options[matchedIndex], idKeys, matchedIndex);
+    }
+  } catch {
+    // Continue with the local option order when a lookup cannot be completed.
+  }
+
+  const fallbackIndex = fallbackLabels.findIndex(
+    (label) => String(label).trim().toLocaleLowerCase() === targetLabel,
+  );
+  return fallbackIndex >= 0 ? fallbackIndex + 1 : null;
+}
+
+function getPayloadDateParts(value, monthKey, yearKey) {
+  if (!value) {
+    return { [monthKey]: "mm", [yearKey]: "yyyy" };
+  }
+
+  if (typeof value === "object" && !(value instanceof Date)) {
+    const month = Number(value.month);
+    const year = Number(value.year);
+    if (Number.isFinite(month) && Number.isFinite(year)) {
+      return {
+        [monthKey]: String(month).padStart(2, "0"),
+        [yearKey]: String(year),
+      };
+    }
+  }
+
+  const date = parseBioExperienceDate(value);
+  return date
+    ? {
+        [monthKey]: String(date.getMonth() + 1).padStart(2, "0"),
+        [yearKey]: String(date.getFullYear()),
+      }
+    : { [monthKey]: "mm", [yearKey]: "yyyy" };
+}
+
+function isTruthyProfileValue(value) {
+  return value === true || value === 1 || /^(true|yes|1)$/i.test(String(value ?? ""));
+}
+
+function normalizeHistoryItem(item, type) {
+  const isEducation = type === "education";
+  const current = !isEducation && isTruthyProfileValue(
+    item?.currentlyWorkHere ??
+      item?.currently_work_here ??
+      item?.currentlyWorkInRole ??
+      item?.isCurrent ??
+      item?.is_current,
+  );
+  const startDate = item?.startDate ?? item?.start_date;
+  const endDate = item?.endDate ?? item?.end_date;
+  const startDateParts = startDate
+    ? getPayloadDateParts(startDate, "startMonth", "startYear")
+    : {
+        startMonth: String(item?.startMonth ?? item?.start_month ?? "mm"),
+        startYear: String(item?.startYear ?? item?.start_year ?? "yyyy"),
+      };
+  const endDateParts = endDate
+    ? getPayloadDateParts(endDate, "endMonth", "endYear")
+    : {
+        endMonth: String(item?.endMonth ?? item?.end_month ?? "mm"),
+        endYear: String(item?.endYear ?? item?.end_year ?? "yyyy"),
+      };
+
+  return {
+    ...(isEducation
+      ? {
+          school: String(item?.school ?? item?.title ?? "").trim(),
+          degree: String(item?.degree ?? item?.degree_name ?? item?.organization ?? "").trim(),
+          fieldOfStudy: String(
+            item?.fieldOfStudy ?? item?.field_of_study ?? "",
+          ).trim(),
+        }
+      : {
+          title: String(item?.title ?? item?.job_title ?? "").trim(),
+          company: String(item?.company ?? item?.organization ?? "").trim(),
+          currentlyWorkHere: current,
+        }),
+    ...startDateParts,
+    ...endDateParts,
+    description: String(item?.description ?? "").trim(),
+  };
+}
+
+function getProfileImagePath(value) {
+  const uri = String(value ?? "").trim();
+  if (!/^https?:\/\//i.test(uri)) return uri;
+
+  try {
+    return new URL(uri).pathname || uri;
+  } catch {
+    return uri;
+  }
+}
+
+function normalizeProfileCompanySizeSelections(value) {
+  const selections = normalizeCompanySizeSelections(value);
+  if (!Array.isArray(value)) return selections;
+
+  value.forEach((item) => {
+    const companySizeId = toOptionalNumber(item?.company_size ?? item?.companySize);
+    const field = COMPANY_SIZE_FIELDS[companySizeId - 1];
+    if (!field) return;
+
+    const interest =
+      item?.selected_interest_level ??
+      item?.interest_level ??
+      item?.company_size_interest_level ??
+      item?.value;
+    const normalized = normalizeCompanySizeSelections({
+      [field.key]: interest,
+    })[field.key];
+    if (normalized) selections[field.key] = normalized;
+  });
+
+  return selections;
+}
+
+function getInitialHistoryDate(item, prefix) {
+  const directDate = item?.[`${prefix}Date`] ?? item?.[`${prefix}_date`];
+  if (directDate) return normalizeProfileHistoryDate(directDate);
+
+  const month = item?.[`${prefix}Month`] ?? item?.[`${prefix}_month`];
+  const year = item?.[`${prefix}Year`] ?? item?.[`${prefix}_year`];
+  if (/^\d+$/.test(String(month ?? "")) && /^\d{4}$/.test(String(year ?? ""))) {
+    return normalizeProfileHistoryDate({ month: Number(month), year: Number(year) });
+  }
+  return "";
+}
+
+function normalizeInitialHistoryItem(item, type, source) {
+  const isEducation = type === "education";
+  const startDate = getInitialHistoryDate(item, "start");
+  const endDate = getInitialHistoryDate(item, "end");
+  const currentlyWorkInRole = !isEducation && isTruthyProfileValue(
+    item?.currentlyWorkHere ??
+      item?.currently_work_here ??
+      item?.currentlyWorkInRole ??
+      item?.isCurrent ??
+      item?.is_current,
+  );
+  const startText = formatProfileExperienceDate(startDate);
+  const endText = currentlyWorkInRole
+    ? "Present"
+    : formatProfileExperienceDate(endDate);
+
+  return {
+    ...item,
+    ...(isEducation
+      ? {
+          title: String(item?.school ?? item?.title ?? ""),
+          school: String(item?.school ?? item?.title ?? ""),
+          organization: String(
+            item?.degree ?? item?.degree_name ?? item?.organization ?? "",
+          ),
+          degree: String(
+            item?.degree ?? item?.degree_name ?? item?.organization ?? "",
+          ),
+          fieldOfStudy: String(
+            item?.fieldOfStudy ?? item?.field_of_study ?? "",
+          ),
+        }
+      : {
+          title: String(item?.title ?? item?.job_title ?? ""),
+          company: String(item?.company ?? item?.organization ?? ""),
+          organization: String(item?.company ?? item?.organization ?? ""),
+          currentlyWorkInRole,
+          isCurrent: currentlyWorkInRole,
+        }),
+    description: String(item?.description ?? ""),
+    startDate,
+    endDate: currentlyWorkInRole ? "" : endDate,
+    dates:
+      startText && endText
+        ? `${startText} - ${endText}`
+        : startText || endText,
+    source,
+    muted: false,
+  };
+}
+
+function getInitialProfileHistory(profile, profileDetails, type) {
+  const isEducation = type === "education";
+  const groups = isEducation
+    ? profileDetails?.education ?? profile?.education
+    : profileDetails?.experiences ?? profile?.experiences;
+  const linkedinCandidates = isEducation
+    ? [
+        groups?.linkedInEducation,
+        groups?.linkedinEducation,
+        groups?.linkedin_education,
+        profile?.linkedInEducation,
+        profile?.linkedinEducation,
+        profile?.educationEntries,
+        profile?.education_details,
+        Array.isArray(profile?.education) ? profile.education : null,
+      ]
+    : [
+        groups?.linkedinJobExperiences,
+        groups?.linkedin_job_experiences,
+        profile?.linkedinExperiences,
+        profile?.linkedin_experiences,
+        Array.isArray(profile?.experiences) ? profile.experiences : null,
+      ];
+  const additionalCandidates = isEducation
+    ? [
+        groups?.additionalEducation,
+        groups?.additional_education,
+        profile?.additionalEducation,
+        profile?.additional_education,
+      ]
+    : [
+        groups?.additionalJobExperiences,
+        groups?.additional_job_experiences,
+        profile?.additionalJobExperiences,
+        profile?.additional_job_experiences,
+      ];
+  const linkedinItems = Array.isArray(groups)
+    ? groups
+    : linkedinCandidates.find(Array.isArray) || [];
+  const additionalItems = additionalCandidates.find(Array.isArray) || [];
+  const hasProfileHistory =
+    Array.isArray(groups) ||
+    linkedinCandidates.some(Array.isArray) ||
+    additionalCandidates.some(Array.isArray);
+
+  return {
+    loaded: hasProfileHistory,
+    items: [
+      ...getProfileItems(linkedinItems).map((item) =>
+        normalizeInitialHistoryItem(item, type, "linkedin"),
+      ),
+      ...getProfileItems(additionalItems).map((item) =>
+        normalizeInitialHistoryItem(item, type, "additional"),
+      ),
+    ],
+  };
+}
+
 export default function ProfileEditScreen({
   profile = {},
   profileImageUrl = "",
@@ -3733,10 +4231,95 @@ export default function ProfileEditScreen({
 }) {
   const metrics = useResponsiveMetrics();
   const styles = createStyles(metrics);
+  const founderBackground =
+    profile?.userBackgroundAsAFounder ||
+    profile?.user_background_as_a_founder ||
+    {};
+  const talentBackground =
+    profile?.userBackgroundAsATalent ||
+    profile?.user_background_as_a_talent ||
+    {};
+  const profileDetails = profile?.userProfile || profile?.user_profile || {};
+  const aboutDetails = profile?.userAbout || profile?.user_about || {};
+  const initialFounderGoal =
+    founderBackground?.matchingGoal ??
+    founderBackground?.matching_goal ??
+    profile?.matchingGoal ??
+    profile?.matching_goal ??
+    "Have some ideas but open to exploring";
+  const initialCommitment =
+    founderBackground?.commitmentLevel ??
+    founderBackground?.commitment_level ??
+    profile?.timeCommitment ??
+    profile?.time_commitment ??
+    "Ready to go full-time with the right cofounder";
+  const initialEquitySplit =
+    founderBackground?.equitySplit ??
+    founderBackground?.equity_split ??
+    profile?.equitySplit ??
+    profile?.equity_split ??
+    {};
+  const initialJobSearchProfile =
+    talentBackground?.jobSearchProfile ??
+    talentBackground?.job_search_profile ??
+    profile?.jobSearchProfile ??
+    profile?.job_search_profile ??
+    {};
+  const initialBioExperience =
+    talentBackground?.bioExperience ??
+    talentBackground?.bio_experience ??
+    profile?.bioExperience ??
+    profile?.bio_experience ??
+    profile;
+  const initialCompensation =
+    talentBackground?.compensation ?? profile?.compensation ?? profile;
+  const initialUserLocation =
+    profileDetails?.location ??
+    profile?.userProfile?.location ??
+    profile?.user_profile?.location ??
+    profile?.locationDetails ??
+    profile?.location_details ??
+    {};
+  const initialPromptEntries = getProfilePromptEntries(profile);
+  const initialExperienceHistory = getInitialProfileHistory(
+    profile,
+    profileDetails,
+    "experience",
+  );
+  const initialEducationHistory = getInitialProfileHistory(
+    profile,
+    profileDetails,
+    "education",
+  );
+  const initialUserSkills =
+    founderBackground?.userSkills ??
+    founderBackground?.user_skills ??
+    profile?.userSkills ??
+    profile?.user_skills ??
+    [];
+  const initialIndustrySelections =
+    aboutDetails?.industries ??
+    aboutDetails?.industryInterests ??
+    aboutDetails?.industry_interests ??
+    profile?.industries ??
+    profile?.industryInterests ??
+    profile?.industry_interests ??
+    [];
   const initialStartupExperience = getProfileTextList(
-    profile?.startupExperiences || profile?.startup_experiences || profile?.startup_experience,
+    aboutDetails?.priorStartupExperience ??
+      aboutDetails?.prior_startup_experience ??
+      profile?.priorStartupExperience ??
+      profile?.prior_startup_experience ??
+      profile?.startupExperiences ??
+      profile?.startup_experiences ??
+      profile?.startup_experience,
   ).join(", ");
-  const initialRole = profile?.userRole || profile?.user_role || profile?.role;
+  const initialRole =
+    profile?.userRole ||
+    profile?.user_role ||
+    profile?.role ||
+    profile?.userDescribedAs ||
+    profile?.user_described_as;
   const [activeTab, setActiveTab] = useState("Edit");
   const [selectedRole, setSelectedRole] = useState(() => {
     if (typeof initialRole === "string" && initialRole.trim()) {
@@ -3749,14 +4332,29 @@ export default function ProfileEditScreen({
         return roleLabel.trim();
       }
     }
+    const initialRoleId = toOptionalNumber(initialRole);
+    if (initialRoleId && ["Founder", "Talent", "Both"][initialRoleId - 1]) {
+      return ["Founder", "Talent", "Both"][initialRoleId - 1];
+    }
     return "Founder";
   });
   const selectedRoleLabel =
     typeof selectedRole === "string" && selectedRole.trim()
       ? selectedRole.trim()
       : "Founder";
-  const [headline, setHeadline] = useState(profile?.headline || profile?.title || "");
-  const [idea, setIdea] = useState(profile?.startupIdea || profile?.startup_idea || "");
+  const [headline, setHeadline] = useState(
+    profile?.linkedinProfilePreview?.headline ||
+    profile?.headline ||
+      profileDetails?.headline ||
+      "",
+  );
+  const [idea, setIdea] = useState(
+    initialBioExperience?.startupIdea ||
+      initialBioExperience?.startup_idea ||
+      profile?.startupIdea ||
+      profile?.startup_idea ||
+      "",
+  );
   const [isEditingHeadline, setIsEditingHeadline] = useState(false);
   const [isEditingIdea, setIsEditingIdea] = useState(false);
   const [editingPromptIndex, setEditingPromptIndex] = useState(null);
@@ -3783,6 +4381,8 @@ export default function ProfileEditScreen({
   const [isEditingWorkAuthorization, setIsEditingWorkAuthorization] =
     useState(false);
   const [workAuthorization, setWorkAuthorization] = useState(() =>
+    talentBackground?.workAuthorization ??
+    talentBackground?.work_authorization ??
     profile?.workAuthorization ??
     profile?.work_authorization ??
     profile?.work_authorization_name ??
@@ -3794,81 +4394,166 @@ export default function ProfileEditScreen({
   );
   const [editingProfileField, setEditingProfileField] = useState("");
   const [matchingGoal, setMatchingGoal] = useState(
-    profile?.matchingGoal || profile?.matching_goal || "Have some ideas but open to exploring",
+    typeof initialFounderGoal === "object"
+      ? initialFounderGoal.matching_goal ||
+        initialFounderGoal.label ||
+        initialFounderGoal.name ||
+        MATCHING_GOALS[(toOptionalNumber(initialFounderGoal.answer) || 0) - 1] ||
+        "Have some ideas but open to exploring"
+      : MATCHING_GOALS[(toOptionalNumber(initialFounderGoal) || 0) - 1] ||
+        initialFounderGoal,
   );
   const [commitmentLevel, setCommitmentLevel] = useState(
-    profile?.timeCommitment || profile?.time_commitment || "Ready to go full-time with the right cofounder",
+    COMMITMENT_LEVELS[(toOptionalNumber(initialCommitment) || 0) - 1] ||
+      (typeof initialCommitment === "object"
+        ? initialCommitment.commitment_level ||
+          initialCommitment.label ||
+          initialCommitment.name ||
+          "Ready to go full-time with the right cofounder"
+        : initialCommitment),
   );
   const [priorStartupExperience, setPriorStartupExperience] = useState(
-    initialStartupExperience || "No prior startup experience",
+    PRIOR_STARTUP_EXPERIENCE_OPTIONS[
+      (toOptionalNumber(
+        aboutDetails?.priorStartupExperience ??
+          aboutDetails?.prior_startup_experience ??
+          profile?.priorStartupExperience ??
+          profile?.prior_startup_experience,
+      ) || 0) - 1
+    ] || initialStartupExperience || "No prior startup experience",
   );
-  const [founderCount, setFounderCount] = useState(0);
-  const [selectedSkills, setSelectedSkills] = useState([]);
+  const [founderCount, setFounderCount] = useState(() =>
+    toOptionalNumber(
+      founderBackground?.noOfFounders ??
+        founderBackground?.no_of_founders ??
+        profile?.noOfFounders ??
+        profile?.no_of_founders,
+    ) ?? 0,
+  );
+  const [selectedSkills, setSelectedSkills] = useState(() =>
+    Array.isArray(initialUserSkills) ? initialUserSkills : [],
+  );
   const [initialSkills, setInitialSkills] = useState([]);
-  const [selectedIndustries, setSelectedIndustries] = useState([]);
+  const [selectedIndustries, setSelectedIndustries] = useState(() =>
+    Array.isArray(initialIndustrySelections) ? initialIndustrySelections : [],
+  );
   const [industryOptions, setIndustryOptions] = useState([]);
   const [skillOptions, setSkillOptions] = useState([]);
-  const [equitySplitOption, setEquitySplitOption] = useState("");
-  const [equityRange, setEquityRange] = useState([10, 90]);
-  const [jobSearchProfile, setJobSearchProfile] = useState({
-    status: JOB_SEARCH_STATUS_OPTIONS[0],
-    workTypes: ["Full Time", "Part Time"],
-    foundersOnly: true,
+  const [equitySplitOption, setEquitySplitOption] = useState(() => {
+    const option =
+      typeof initialEquitySplit === "object"
+        ? initialEquitySplit.answer ??
+          initialEquitySplit.equity_split_option ??
+          initialEquitySplit.label ??
+          ""
+        : initialEquitySplit;
+    return EQUITY_SPLIT_OPTIONS[(toOptionalNumber(option) || 0) - 1] || option;
+  });
+  const [equityRange, setEquityRange] = useState(() => {
+    const min = toOptionalNumber(
+      initialEquitySplit?.minEquityRange ?? initialEquitySplit?.min_equity_range,
+    );
+    const max = toOptionalNumber(
+      initialEquitySplit?.maxEquityRange ?? initialEquitySplit?.max_equity_range,
+    );
+    return min !== null && max !== null ? [min, max] : [10, 90];
+  });
+  const [jobSearchProfile, setJobSearchProfile] = useState(() => {
+    const selectedStatus =
+      initialJobSearchProfile?.jobSearchAnswer ??
+      initialJobSearchProfile?.job_search_answer ??
+      initialJobSearchProfile?.status ??
+      JOB_SEARCH_STATUS_OPTIONS[0];
+    const selectedWorkTypes =
+      initialJobSearchProfile?.jobSearchWorkType ??
+      initialJobSearchProfile?.job_search_work_type ??
+      initialJobSearchProfile?.workTypes ??
+      ["Full Time", "Part Time"];
+
+    return {
+      status:
+        JOB_SEARCH_STATUS_OPTIONS[(toOptionalNumber(selectedStatus) || 0) - 1] ||
+        selectedStatus,
+      workTypes: (Array.isArray(selectedWorkTypes) ? selectedWorkTypes : [])
+        .map((workType) =>
+          JOB_SEARCH_WORK_TYPES[(toOptionalNumber(workType) || 0) - 1] ||
+          workType,
+        ),
+      foundersOnly: isTruthyProfileValue(
+        initialJobSearchProfile?.foundersCanSee ??
+          initialJobSearchProfile?.founders_can_see ??
+          initialJobSearchProfile?.foundersOnly ??
+          true,
+      ),
+    };
   });
   const [bioExperience, setBioExperience] = useState(() => ({
     fundingStage:
-      profile?.fundingStage ??
-      profile?.funding_stage_name ??
-      profile?.funding_stage_id ??
+      initialBioExperience?.fundingStage ??
+      initialBioExperience?.funding_stage_name ??
+      initialBioExperience?.funding_stage_id ??
       "",
     riskAppetite:
-      profile?.riskAppetite ??
-      profile?.risk_appetite_name ??
-      profile?.risk_appetite_id ??
+      initialBioExperience?.riskAppetite ??
+      initialBioExperience?.risk_appetite_name ??
+      initialBioExperience?.risk_appetite_id ??
       "",
     employmentType:
-      profile?.employmentType ??
-      profile?.employment_type_name ??
-      profile?.employment_type_id ??
+      initialBioExperience?.employmentType ??
+      initialBioExperience?.employment_type_name ??
+      initialBioExperience?.employment_type_id ??
       "",
     companyName: String(
-      profile?.companyName ?? profile?.company_name ?? "",
+      initialBioExperience?.companyName ??
+        initialBioExperience?.company_name ??
+        "",
     ),
     location: String(
-      profile?.experienceLocation ??
-        profile?.experience_location ??
+      initialBioExperience?.location ??
+        initialBioExperience?.experienceLocation ??
+        initialBioExperience?.experience_location ??
         profile?.linkedinProfilePreview?.firstLocation ??
         "",
     ),
     locationType:
-      profile?.locationType ??
-      profile?.location_type_name ??
-      profile?.location_type_id ??
+      initialBioExperience?.locationType ??
+      initialBioExperience?.location_type_name ??
+      initialBioExperience?.location_type_id ??
       "",
-    startDate: profile?.startDate ?? profile?.start_date ?? "",
+    startDate:
+      initialBioExperience?.startDate ?? initialBioExperience?.start_date ?? "",
     currentlyWorkHere: [true, 1, "true"].includes(
-      profile?.currentlyWorkHere ?? profile?.currently_work_here ?? false,
+      initialBioExperience?.currentlyWorkHere ??
+        initialBioExperience?.currently_work_here ??
+        false,
     ),
-    endDate: profile?.endDate ?? profile?.end_date ?? "",
-    title: String(profile?.title ?? ""),
+    endDate:
+      initialBioExperience?.endDate ?? initialBioExperience?.end_date ?? "",
+    title: String(initialBioExperience?.title ?? ""),
     primaryRole:
-      profile?.primaryRole ??
-      profile?.primary_role_name ??
-      profile?.primary_role_id ??
+      initialBioExperience?.primaryRole ??
+      initialBioExperience?.primary_role_name ??
+      initialBioExperience?.primary_role_id ??
       "",
     yearsOfExperience: String(
-      profile?.yearsOfExperience ?? profile?.years_of_experience ?? "",
+      initialBioExperience?.yearsOfExperience ??
+        initialBioExperience?.years_of_experience ??
+        "",
     ),
     secondaryRole:
-      profile?.secondaryRole ??
-      profile?.secondary_role_name ??
-      profile?.secondary_role_id ??
+      initialBioExperience?.secondaryRole ??
+      initialBioExperience?.secondary_role_name ??
+      initialBioExperience?.secondary_role_id ??
       "",
-    bio: String(profile?.bio ?? ""),
-    startupIdea: String(profile?.startupIdea ?? profile?.startup_idea ?? ""),
+    bio: String(initialBioExperience?.bio ?? ""),
+    startupIdea: String(
+      initialBioExperience?.startupIdea ??
+        initialBioExperience?.startup_idea ??
+        "",
+    ),
   }));
   const [compensation, setCompensation] = useState(() => {
-    const values = profile?.compensation || profile || {};
+    const values = initialCompensation || {};
     const cashExpectation =
       values.cash_equity_expectation ??
       values.cashEquityExpectation ??
@@ -3881,7 +4566,9 @@ export default function ProfileEditScreen({
       cashEquityExpectationId:
         values.cash_equity_expectation_id ??
         values.cashEquityExpectationId ??
-        (typeof cashExpectation === "object" ? cashExpectation.id : null),
+        (typeof cashExpectation === "object"
+          ? cashExpectation.id
+          : toOptionalNumber(values.cashEquityExpectation) ?? null),
       cashEquityExpectation:
         typeof cashExpectation === "object"
           ? cashExpectation.cash_equity_expectation ?? cashExpectation.label ?? ""
@@ -3892,17 +4579,22 @@ export default function ProfileEditScreen({
         values.expected_minimum_salary_preference ??
         "",
       expectedMinimumSalary: String(
-        values.expected_minimum_salary ??
-          values.expectedMinimumSalary ??
-          "",
+        values.amount ??
+          values.expected_minimum_salary_amount ??
+          values.expectedMinimumSalaryAmount ??
+          (typeof values.expectedMinimumSalary === "string"
+            ? values.expectedMinimumSalary
+            : ""),
       ),
       expectedMinimumSalaryId:
         values.expected_minimum_salary_id ??
         values.expectedMinimumSalaryId ??
+        toOptionalNumber(values.expected_minimum_salary) ??
         null,
       salaryDurationId:
         values.salary_duration_id ??
         values.salaryDurationId ??
+        toOptionalNumber(values.salaryDuration) ??
         (typeof salaryDuration === "object" ? salaryDuration.id : null),
       salaryDuration:
         typeof salaryDuration === "object"
@@ -3911,6 +4603,7 @@ export default function ProfileEditScreen({
       currencyId:
         values.currency_id ??
         values.currencyId ??
+        toOptionalNumber(values.currency) ??
         currency.currency_id ??
         currency.id ??
         null,
@@ -3926,8 +4619,10 @@ export default function ProfileEditScreen({
     };
   });
   const [companySizeInterests, setCompanySizeInterests] = useState(() =>
-    normalizeCompanySizeSelections(
-      profile?.companySizeInterests ??
+    normalizeProfileCompanySizeSelections(
+      talentBackground?.company_size_interest ??
+        talentBackground?.companySizeInterests ??
+        profile?.companySizeInterests ??
         profile?.companySizeInterestLevels ??
         profile?.company_size_interests ??
         profile?.company_size_interest_levels ??
@@ -3935,20 +4630,56 @@ export default function ProfileEditScreen({
         {},
     ),
   );
-  const [isHiring, setIsHiring] = useState(true);
+  const [isHiring, setIsHiring] = useState(() =>
+    isTruthyProfileValue(
+      (typeof initialFounderGoal === "object"
+        ? initialFounderGoal.isHiring ?? initialFounderGoal.is_hiring
+        : undefined) ??
+        founderBackground?.isHiring ??
+        founderBackground?.is_hiring ??
+        true,
+    ),
+  );
   const [promptAnswers, setPromptAnswers] = useState(() =>
-    PROMPT_SLOTS.map(() => ""),
+    initialPromptEntries.map((prompt) => prompt.answer),
   );
   const [promptTitles, setPromptTitles] = useState(() =>
-    PROMPT_SLOTS.map(() => ""),
+    initialPromptEntries.map((prompt) => prompt.title),
   );
-  const [profileName, setProfileName] = useState(null);
+  const [profileName, setProfileName] = useState(() => {
+    const fullName = String(
+      profileDetails?.name || profile?.displayName || profile?.full_name || profile?.name || "",
+    ).trim();
+    const [firstName = "", ...lastNameParts] = fullName.split(/\s+/);
+    return {
+      firstName:
+        profileDetails?.firstName ??
+        profileDetails?.first_name ??
+        profile?.firstName ??
+        profile?.first_name ??
+        firstName,
+      lastName:
+        profileDetails?.lastName ??
+        profileDetails?.last_name ??
+        profile?.lastName ??
+        profile?.last_name ??
+        lastNameParts.join(" "),
+    };
+  });
   const [dateOfBirth, setDateOfBirth] = useState(() =>
-    normalizeProfileDateOfBirth(initialDateOfBirth),
+    normalizeProfileDateOfBirth(
+      initialDateOfBirth ||
+        profileDetails?.dateOfBirth ||
+        profileDetails?.date_of_birth ||
+        profile?.dateOfBirth ||
+        profile?.date_of_birth,
+    ),
   );
   const [profilePhoto, setProfilePhoto] = useState(() => ({
     profileImageUri:
       profileImageUrl ||
+      profileDetails?.profileImageUri ||
+      profileDetails?.profile_image_uri ||
       profile?.profileImageUri ||
       profile?.profile_image_uri ||
       "",
@@ -3974,12 +4705,67 @@ export default function ProfileEditScreen({
   const [openProfilePhotoSourceMenu, setOpenProfilePhotoSourceMenu] =
     useState(false);
   const [profileLocation, setProfileLocation] = useState(
-    profile?.locationPreference ?? null,
+    () => ({
+      ...initialUserLocation,
+      city: getLocationLabel(
+        initialUserLocation?.city ??
+          initialUserLocation?.selected_city ??
+          profile?.locationDetails?.selected_city ??
+          profile?.location_details?.selected_city ??
+          "",
+      ),
+      cityId:
+        getLocationOptionId(
+          initialUserLocation?.cityId ??
+            initialUserLocation?.city_id ??
+            initialUserLocation?.selected_city_id ??
+            initialUserLocation?.city ??
+            initialUserLocation?.selected_city,
+            ["city_id", "id", "city_code", "code", "value"],
+        ) ?? null,
+      countryId:
+        getLocationOptionId(
+          initialUserLocation?.countryId ??
+            initialUserLocation?.country_id ??
+            initialUserLocation?.selected_country_id ??
+            initialUserLocation?.country ??
+            initialUserLocation?.selected_country,
+          ["country_id", "id"],
+        ) ?? null,
+      selectedAnswers:
+        initialUserLocation?.selectedAnswers ??
+        initialUserLocation?.preference ??
+        profile?.locationPreference ??
+        profile?.location_preference ??
+        [],
+    }),
   );
-  const [linkedinUrl, setLinkedinUrl] = useState(profile?.linkedinUrl ?? profile?.linkedin_url ?? "");
-  const [schedulingLink, setSchedulingLink] = useState(undefined);
-  const [profileExperiences, setProfileExperiences] = useState([]);
-  const [profileEducation, setProfileEducation] = useState([]);
+  const [linkedinUrl, setLinkedinUrl] = useState(
+    profileDetails?.linkedInUrl ??
+      profileDetails?.linkedinUrl ??
+      profileDetails?.linkedin_url ??
+      profile?.linkedinUrl ??
+      profile?.linkedin_url ??
+      "",
+  );
+  const [schedulingLink, setSchedulingLink] = useState(
+    profileDetails?.schedulingLink ??
+      profileDetails?.scheduling_link ??
+      profile?.schedulingLink ??
+      profile?.scheduling_link,
+  );
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
+  const [saveError, setSaveError] = useState("");
+  const [profileExperiences, setProfileExperiences] = useState(
+    initialExperienceHistory.items,
+  );
+  const [profileEducation, setProfileEducation] = useState(
+    initialEducationHistory.items,
+  );
+  const [profileHistoryLoaded, setProfileHistoryLoaded] = useState(
+    initialExperienceHistory.loaded || initialEducationHistory.loaded,
+  );
+  const profileHistoryEdited = useRef(false);
   const [roleOptions, setRoleOptions] = useState([]);
   const [loadingRoleOptions, setLoadingRoleOptions] = useState(true);
   const [errorMessageRoleOptions, setErrorMessageRoleOptions] = useState("");
@@ -4033,6 +4819,7 @@ export default function ProfileEditScreen({
               isCurrent: Boolean(
                 exp.is_current || (exp.start_date && !exp.end_date),
               ),
+              source: "linkedin",
               muted: false,
             };
           });
@@ -4062,18 +4849,80 @@ export default function ProfileEditScreen({
               organization: edu.degree_name || edu.degree || "",
               dates: datesStr,
               description: edu.field_of_study || "",
+              fieldOfStudy: edu.field_of_study || "",
+              startDate: normalizeProfileHistoryDate(edu.start_date),
+              endDate: normalizeProfileHistoryDate(edu.end_date),
+              source: "linkedin",
               muted: false,
             };
           });
 
-          setProfileExperiences(experiences);
-          setProfileEducation(education);
+          if (!profileHistoryEdited.current) {
+            setProfileExperiences((current) =>
+              current.some((item) => item.source === "linkedin")
+                ? current
+                : [
+                    ...experiences,
+                    ...current.filter((item) => item.source !== "linkedin"),
+                  ],
+            );
+            setProfileEducation((current) =>
+              current.some((item) => item.source === "linkedin")
+                ? current
+                : [
+                    ...education,
+                    ...current.filter((item) => item.source !== "linkedin"),
+                  ],
+            );
+          }
+          setProfileHistoryLoaded(true);
         } catch (error) {
           console.error("Failed to fetch LinkedIn details", error);
         }
       }
     }
     fetchLinkedinDetails();
+  }, [firebaseToken]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function fetchUserIndustries() {
+      if (!firebaseToken) return;
+
+      try {
+        const [industriesPayload, selectedPayload] = await Promise.all([
+          getIndustries(firebaseToken),
+          getUserProfileSelectedIndustries(firebaseToken),
+        ]);
+        const mapped = industriesPayload.map(toIndustryModel).filter(Boolean);
+        const selected = selectedPayload
+          .map(toIndustryModel)
+          .filter(Boolean)
+          .map(
+            (industry) =>
+              mapped.find(
+                (option) =>
+                  option.value === industry.value ||
+                  option.label === industry.label,
+              )?.value,
+          )
+          .filter((value) => value !== undefined)
+          .slice(0, MAX_INDUSTRY_SELECTION);
+
+        if (isMounted) {
+          setIndustryOptions(mapped);
+          setSelectedIndustries(selected);
+        }
+      } catch (error) {
+        console.error("Failed to fetch user industries", error);
+      }
+    }
+
+    void fetchUserIndustries();
+    return () => {
+      isMounted = false;
+    };
   }, [firebaseToken]);
 
   useEffect(() => {
@@ -4327,7 +5176,7 @@ export default function ProfileEditScreen({
   if (isEditingHeadline) {
     return (
       <HeadlineEditScreen
-        initialValue={headline}
+        initialValue={profile?.linkedinProfilePreview?.headline || headline}
         onBack={() => setIsEditingHeadline(false)}
         onDone={(value) => {
           setHeadline(value);
@@ -4341,7 +5190,7 @@ export default function ProfileEditScreen({
   if (isEditingIdea) {
     return (
       <IdeaEditScreen
-        initialValue={profile?.startupIdea}
+        initialValue={idea || profile?.startupIdea || profile?.startup_idea || ""}
         onBack={() => setIsEditingIdea(false)}
         onDone={(value) => {
           setIdea(value);
@@ -4520,6 +5369,8 @@ export default function ProfileEditScreen({
         onRemove={
           canRemoveExperience
             ? () => {
+                profileHistoryEdited.current = true;
+                setProfileHistoryLoaded(true);
                 setProfileExperiences((current) =>
                   current.filter((_, index) => index !== editingExperienceIndex),
                 );
@@ -4529,6 +5380,8 @@ export default function ProfileEditScreen({
             : undefined
         }
         onDone={(experience) => {
+          profileHistoryEdited.current = true;
+          setProfileHistoryLoaded(true);
           const startDate = formatProfileExperienceDate(experience.startDate);
           const endDate = experience.currentlyWorkInRole
             ? "Present"
@@ -4554,6 +5407,9 @@ export default function ProfileEditScreen({
               endDate: experience.currentlyWorkInRole ? "" : experience.endDate,
               currentlyWorkInRole: experience.currentlyWorkInRole,
               isCurrent: experience.currentlyWorkInRole,
+              source: hasExistingExperience
+                ? current[editingExperienceIndex]?.source || "linkedin"
+                : "additional",
               muted: false,
             };
 
@@ -4590,6 +5446,8 @@ export default function ProfileEditScreen({
         onRemove={
           canRemoveEducation
             ? () => {
+                profileHistoryEdited.current = true;
+                setProfileHistoryLoaded(true);
                 setProfileEducation((current) =>
                   current.filter((_, index) => index !== editingEducationIndex),
                 );
@@ -4599,6 +5457,8 @@ export default function ProfileEditScreen({
             : undefined
         }
         onDone={(education) => {
+          profileHistoryEdited.current = true;
+          setProfileHistoryLoaded(true);
           const startDate = formatProfileExperienceDate(education.startDate);
           const endDate = formatProfileExperienceDate(education.endDate);
           setProfileEducation((current) => {
@@ -4618,6 +5478,8 @@ export default function ProfileEditScreen({
                 .join(" · "),
                 startDate: education.startDate,
                 endDate: education.endDate,
+                source:
+                  current[editingEducationIndex]?.source || "linkedin",
                 muted: false,
               };
               return updated;
@@ -4637,6 +5499,7 @@ export default function ProfileEditScreen({
                 .join(" · "),
                 startDate: education.startDate,
                 endDate: education.endDate,
+                source: "additional",
                 muted: false,
               },
             ];
@@ -4720,7 +5583,13 @@ export default function ProfileEditScreen({
   if (editingProfileField === "location") {
     return (
       <LocationProfileEditScreen
-        initialCities={profile.locationDetails?.cities || []}
+        initialCities={
+          [
+            initialUserLocation?.cities,
+            profile.locationDetails?.cities,
+            profile.location_details?.cities,
+          ].find((cities) => Array.isArray(cities) && cities.length) ?? []
+        }
         initialLocation={{
           ...(profileLocation || {}),
           city:
@@ -4849,7 +5718,7 @@ export default function ProfileEditScreen({
   const previewLocationPreference = getLocationPreferenceText(profile, profileLocation);
   const previewLinkedinUrl = linkedinUrl || profile?.linkedinUrl || profile?.linkedin_url || "";
   const previewSummary = [
-    headline || bioExperience.title || profile?.title || profile?.headline,
+    profile?.linkedinProfilePreview?.headline || headline || bioExperience.title || profile?.headline,
     bioExperience.bio || profile?.bio,
   ]
     .map((part) => String(part || "").trim())
@@ -4932,6 +5801,598 @@ export default function ProfileEditScreen({
     profile?.intent_badge ||
     (selectedRoleLabel === "Talent" ? "Open to work" : "Open to founding");
 
+  async function handleSaveProfile() {
+    if (isSavingProfile) return;
+
+    setIsSavingProfile(true);
+    setSaveError("");
+
+    try {
+      const promptOptions =
+        promptTitles.some(Boolean) || promptAnswers.some(Boolean)
+          ? await getPrompts(firebaseToken).catch(() => [])
+          : [];
+      const normalizedPromptOptions = promptOptions
+        .map(toPromptOption)
+        .filter(Boolean);
+      const savedPromptRows = promptTitles
+        .map((title, index) => {
+          const promptTitle = String(title || "").trim();
+          const answer = String(promptAnswers[index] || "").trim();
+          if (!promptTitle && !answer) return null;
+
+          const selectedOption = normalizedPromptOptions.find(
+            (option) =>
+              option.text.toLocaleLowerCase() ===
+              promptTitle.toLocaleLowerCase(),
+          );
+          const initialEntry = initialPromptEntries[index];
+          const promptId =
+            selectedOption?.id ??
+            (initialEntry?.title === promptTitle ? initialEntry.id : null) ??
+            (toOptionalNumber(promptTitle) ?? index + 1);
+
+          return {
+            prompt: String(promptId),
+            answer,
+          };
+        })
+        .filter(Boolean);
+
+      const [
+        matchingGoalId,
+        commitmentLevelId,
+        equitySplitId,
+        priorStartupExperienceId,
+        workAuthorizationId,
+        cashEquityExpectationId,
+        expectedMinimumSalaryId,
+        industryIds,
+        companySizeInterestIds,
+        fundingStageId,
+        riskAppetiteId,
+        employmentTypeId,
+        primaryRoleId,
+        secondaryRoleId,
+        locationTypeId,
+      ] = await Promise.all([
+        resolveOptionId({
+          path: "/matching-goals",
+          value: matchingGoal,
+          token: firebaseToken,
+          labelKeys: ["matching_goal", "label", "name"],
+          idKeys: ["matching_goal_id", "id"],
+          listKeys: ["matching_goals", "items"],
+          fallbackLabels: MATCHING_GOALS,
+        }),
+        resolveOptionId({
+          path: "/commitment-levels",
+          value: commitmentLevel,
+          token: firebaseToken,
+          labelKeys: ["commitment_level", "label", "name"],
+          idKeys: ["commitment_level_id", "id"],
+          listKeys: ["commitment_levels", "items"],
+          fallbackLabels: COMMITMENT_LEVELS,
+        }),
+        resolveOptionId({
+          path: "/equity-split",
+          value: equitySplitOption,
+          token: firebaseToken,
+          labelKeys: ["equity_split_option", "option", "label", "name", "value"],
+          idKeys: ["equity_split_option_id", "equity_split_id", "id"],
+          listKeys: ["equity_split", "equity_splits", "items"],
+          fallbackLabels: EQUITY_SPLIT_OPTIONS,
+        }),
+        resolveOptionId({
+          path: "/prior-startup-experiences",
+          value: priorStartupExperience,
+          token: firebaseToken,
+          labelKeys: [
+            "prior_startup_experience",
+            "label",
+            "name",
+            "priorStartupExperience",
+          ],
+          idKeys: ["prior_startup_experience_id", "id"],
+          listKeys: ["prior_startup_experiences", "items"],
+          fallbackLabels: PRIOR_STARTUP_EXPERIENCE_OPTIONS,
+        }),
+        resolveOptionId({
+          path: "/work-authorizations",
+          value: workAuthorization,
+          token: firebaseToken,
+          labelKeys: [
+            "work_authorization",
+            "work_authorization_name",
+            "work_authorization_status",
+            "authorization_name",
+            "authorization",
+            "label",
+            "name",
+            "title",
+            "value",
+          ],
+          idKeys: ["work_authorization_id", "authorization_id", "id"],
+          listKeys: ["work_authorizations", "work_authorization", "items"],
+        }),
+        resolveOptionId({
+          path: "/compensation",
+          value:
+            compensation.cashEquityExpectationId ??
+            compensation.cashEquityExpectation,
+          token: firebaseToken,
+          labelKeys: ["cash_equity_expectation", "label", "name"],
+          idKeys: ["cash_equity_expectation_id", "id"],
+          listKeys: ["cash_equity_expectations", "items"],
+        }),
+        resolveOptionId({
+          path: "/compensation",
+          value: compensation.expectedMinimumSalaryId ?? 2,
+          token: firebaseToken,
+          labelKeys: ["expected_minimum_salary", "label", "name"],
+          idKeys: ["expected_minimum_salary_id", "id"],
+          listKeys: ["expected_minimum_salaries", "items"],
+        }),
+        Promise.all(
+          selectedIndustries.map((industry) =>
+            resolveOptionId({
+              path: "/industries",
+              value: industry,
+              token: firebaseToken,
+              labelKeys: ["industry_name", "label", "name"],
+              idKeys: ["industry_id", "id"],
+              listKeys: ["industries", "items"],
+            }),
+          ),
+        ),
+        Promise.all(
+          COMPANY_SIZE_FIELDS.map((field) => {
+            const selection = companySizeInterests[field.key];
+            const value =
+              selection?.id ??
+              selection?.company_size_interest_level_id ??
+              selection?.interest_level_id ??
+              selection;
+            return resolveOptionId({
+              path: "/company-size-interest-levels",
+              value,
+              token: firebaseToken,
+              labelKeys: [
+                "company_size_interest_level",
+                "company_size_interest_level_name",
+                "interest_level",
+                "interest_level_name",
+                "company_size_interest_level_label",
+                "label",
+                "name",
+                "title",
+                "value",
+              ],
+              idKeys: [
+                "company_size_interest_level_id",
+                "interest_level_id",
+                "id",
+              ],
+              listKeys: ["company_size_interest_levels", "items"],
+            });
+          }),
+        ),
+        ...[
+          ["fundingStage", "funding_stage_name", "funding_stage_id"],
+          ["riskAppetite", "risk_appetite_name", "risk_appetite_id"],
+          ["employmentType", "employment_type_name", "employment_type_id"],
+          ["primaryRole", "primary_role_name", "primary_role_id"],
+          ["secondaryRole", "secondary_role_name", "secondary_role_id"],
+          ["locationType", "location_type_name", "location_type_id"],
+        ].map(([field, labelKey, idKey]) =>
+          resolveOptionId({
+            path: BIO_EXPERIENCE_PICKER_FIELDS[field].endpoint,
+            value: bioExperience[field],
+            token: firebaseToken,
+            labelKeys: [labelKey, "label", "name"],
+            idKeys: [idKey, "id"],
+            listKeys: [
+              `${field.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`)}s`,
+              "items",
+            ],
+          }),
+        ),
+      ]);
+
+      const promptWorkTypeIds = jobSearchProfile.workTypes
+        .map((workType) => {
+          const directId = toOptionalNumber(workType);
+          if (directId !== null) return directId;
+          const index = JOB_SEARCH_WORK_TYPES.findIndex(
+            (item) =>
+              item.toLocaleLowerCase() ===
+              String(workType || "").toLocaleLowerCase(),
+          );
+          return index >= 0 ? index + 1 : null;
+        })
+        .filter((value) => value !== null);
+      const jobSearchAnswer =
+        toOptionalNumber(jobSearchProfile.status) ??
+        Math.max(
+          0,
+          JOB_SEARCH_STATUS_OPTIONS.findIndex(
+            (status) =>
+              status.toLocaleLowerCase() ===
+              String(jobSearchProfile.status || "").toLocaleLowerCase(),
+          ),
+        ) + 1;
+      const skillValues = selectedSkills;
+      const skillIds = skillValues
+        .map((skill) => {
+          const directId = toOptionalNumber(skill);
+          if (directId !== null) return directId;
+          const skillLabel =
+            skill && typeof skill === "object"
+              ? skill.skill_name || skill.label || skill.name || ""
+              : String(skill || "");
+          return toOptionalNumber(
+            skillOptions.find(
+              (option) =>
+                option.label.toLocaleLowerCase() ===
+                skillLabel.toLocaleLowerCase(),
+            )?.value,
+          );
+        })
+        .filter((value) => value !== null);
+      const roleId =
+        toOptionalNumber(selectedRole) ??
+        toOptionalNumber(
+          roleOptions.find(
+            (option) =>
+              option.described_as.toLocaleLowerCase() ===
+              selectedRoleLabel.toLocaleLowerCase(),
+          )?.id,
+        ) ??
+        toOptionalNumber(profile?.userDescribedAs ?? profile?.user_described_as) ??
+        (["Founder", "Talent", "Both"].indexOf(selectedRoleLabel) + 1 || null);
+      const amountText = String(compensation.expectedMinimumSalary ?? "")
+        .replace(/,/g, "")
+        .trim();
+      const amount = amountText && Number.isFinite(Number(amountText))
+        ? Number(amountText)
+        : null;
+      const locationPreferenceSource =
+        profileLocation?.selectedAnswers ??
+        profileLocation?.preference ??
+        profileDetails?.location?.preference ??
+        profile?.locationPreference ??
+        profile?.location_preference ??
+        [];
+      const locationPreferences = Array.isArray(locationPreferenceSource)
+        ? locationPreferenceSource
+        : locationPreferenceSource && typeof locationPreferenceSource === "object"
+          ? Object.entries(locationPreferenceSource).map(([questionId, answer]) => ({
+              question_id: questionId,
+              selected_answer_id:
+                answer && typeof answer === "object"
+                  ? answer.selected_answer_id ?? answer.answer_id ?? answer.id
+                  : answer,
+            }))
+          : [];
+      const normalizedLocationPreferences = locationPreferences
+        .map((preference) => ({
+          question_id: toOptionalNumber(
+            preference?.question_id ?? preference?.questionId ?? preference?.id,
+          ),
+          selected_answer_id: toOptionalNumber(
+            preference?.selected_answer_id ??
+              preference?.answer_id ??
+              preference?.answerId,
+          ),
+        }))
+        .filter(
+          (preference) =>
+            preference.question_id !== null &&
+            preference.selected_answer_id !== null,
+        );
+      const experienceGroups =
+        profileDetails?.experiences ??
+        profile?.experiences ??
+        {};
+      const initialLinkedinExperiences = getProfileItems(
+        experienceGroups?.linkedinJobExperiences ??
+          experienceGroups?.linkedin_job_experiences ??
+          profile?.linkedinExperiences ??
+          profile?.linkedin_experiences ??
+          (Array.isArray(profile?.experiences) ? profile.experiences : []),
+      );
+      const initialAdditionalExperiences = getProfileItems(
+        experienceGroups?.additionalJobExperiences ??
+          experienceGroups?.additional_job_experiences ??
+          profile?.additionalJobExperiences ??
+          profile?.additional_job_experiences,
+      );
+      const experiencesForSave = profileHistoryLoaded
+        ? {
+            linkedin: profileExperiences.filter(
+              (experience) => experience.source === "linkedin",
+            ),
+            additional: profileExperiences.filter(
+              (experience) => experience.source !== "linkedin",
+            ),
+          }
+        : {
+            linkedin: initialLinkedinExperiences,
+            additional: initialAdditionalExperiences,
+          };
+      const educationGroups =
+        profileDetails?.education ?? profile?.education ?? {};
+      const initialLinkedinEducation = getProfileItems(
+        educationGroups?.linkedInEducation ??
+          educationGroups?.linkedinEducation ??
+          educationGroups?.linkedin_education ??
+          profile?.linkedInEducation ??
+          profile?.linkedinEducation ??
+          profile?.educationEntries ??
+          profile?.education_details ??
+          (Array.isArray(profile?.education) ? profile.education : []),
+      );
+      const initialAdditionalEducation = getProfileItems(
+        educationGroups?.additionalEducation ??
+          educationGroups?.additional_education ??
+          profile?.additionalEducation ??
+          profile?.additional_education,
+      );
+      const educationForSave = profileHistoryLoaded
+        ? {
+            linkedin: profileEducation.filter(
+              (education) => education.source === "linkedin",
+            ),
+            additional: profileEducation.filter(
+              (education) => education.source !== "linkedin",
+            ),
+          }
+        : {
+            linkedin: initialLinkedinEducation,
+            additional: initialAdditionalEducation,
+          };
+      const profileNameValue = [
+        profileName?.firstName ?? profileDetails?.firstName ?? profile?.firstName,
+        profileName?.lastName ?? profileDetails?.lastName ?? profile?.lastName,
+      ]
+        .map((part) => String(part || "").trim())
+        .filter(Boolean)
+        .join(" ") ||
+        String(profileDetails?.name || profile?.displayName || profile?.name || "").trim();
+      const profileAge =
+        toOptionalNumber(profileDetails?.age ?? profile?.age) ??
+        (dateOfBirth ? calculateProfileAge(dateOfBirth) : null);
+      const selectedCityValue =
+        profileLocation?.city ??
+        profileLocation?.selected_city ??
+        initialUserLocation?.city ??
+        initialUserLocation?.selected_city ??
+        profile?.locationDetails?.selected_city ??
+        profile?.location_details?.selected_city ??
+        profile?.selected_city ??
+        profileDetails?.selected_city ??
+        "";
+      const initialCityOptions =
+        [
+          initialUserLocation?.cities,
+          profile?.locationDetails?.cities,
+          profile?.location_details?.cities,
+        ].find((cities) => Array.isArray(cities) && cities.length) ?? [];
+      const matchingCity = findInitialCity(initialCityOptions, selectedCityValue);
+      const locationCityId =
+        getLocationOptionId(
+          profileLocation?.cityId ??
+            profileLocation?.city_id ??
+            profileLocation?.selected_city_id,
+          ["city_id", "id", "city_code", "code"],
+        ) ??
+        getLocationOptionId(selectedCityValue, [
+          "city_id",
+          "id",
+          "city_code",
+          "code",
+          "value",
+        ]) ??
+        getLocationOptionId(matchingCity, [
+          "city_id",
+          "id",
+          "city_code",
+          "code",
+          "value",
+        ]) ??
+        getLocationOptionId(
+          initialUserLocation?.cityId ??
+            initialUserLocation?.city_id ??
+            initialUserLocation?.selected_city_id ??
+            profile?.city_id ??
+            profile?.selected_city_id ??
+            profileDetails?.city_id ??
+            profileDetails?.selected_city_id,
+          ["city_id", "id", "city_code", "code", "value"],
+        );
+      const locationCountryId =
+        getLocationOptionId(
+          profileLocation?.countryId ??
+            profileLocation?.country_id ??
+            profileLocation?.selected_country_id,
+          ["country_id", "id"],
+        ) ??
+        getLocationOptionId(selectedCityValue, ["country_id", "countryId"]) ??
+        getLocationOptionId(selectedCityValue?.country, ["country_id", "id"]) ??
+        getLocationOptionId(matchingCity, ["country_id", "countryId"]) ??
+        getLocationOptionId(matchingCity?.country, ["country_id", "id"]) ??
+        getLocationOptionId(
+          initialUserLocation?.countryId ??
+            initialUserLocation?.country_id ??
+            initialUserLocation?.selected_country_id ??
+            initialUserLocation?.country ??
+            initialUserLocation?.selected_country ??
+            profile?.country_id ??
+            profile?.countryId ??
+            profile?.selected_country_id ??
+            profileDetails?.country_id ??
+            profileDetails?.selected_country_id,
+          ["country_id", "id"],
+        );
+      const equityHasRange = /specific equity range/i.test(
+        String(equitySplitOption || ""),
+      );
+      const profileImageUri = getProfileImagePath(
+        profilePhoto.profileImageUri,
+      );
+      const payload = {
+        headline: String(headline || "").trim(),
+        profileImageUri,
+        userDescribedAs: roleId,
+        userPrompts: savedPromptRows,
+        ...(roleId === 1 || roleId === 3
+          ? {
+              userBackgroundAsAFounder: {
+                matchingGoal: {
+                  answer: matchingGoalId,
+                  isHiring: isHiring ? "Yes" : "No",
+                },
+                commitmentLevel: commitmentLevelId,
+                noOfFounders:
+                  toOptionalNumber(founderCount) ??
+                  toOptionalNumber(founderBackground?.noOfFounders) ??
+                  0,
+                userSkills: skillIds,
+                equitySplit: {
+                  answer: equitySplitId,
+                  minEquityRange: equityHasRange ? String(equityRange[0]) : "NA",
+                  maxEquityRange: equityHasRange ? String(equityRange[1]) : "NA",
+                },
+              },
+            }
+          : {}),
+        ...(roleId === 2 || roleId === 3
+          ? {
+              userBackgroundAsATalent: {
+                jobSearchProfile: {
+                  jobSearchAnswer,
+                  jobSearchWorkType: promptWorkTypeIds,
+                  foundersCanSee: Boolean(jobSearchProfile.foundersOnly),
+                },
+                bioExperience: {
+                  title: String(bioExperience.title || "").trim(),
+                  primaryRole: primaryRoleId,
+                  secondaryRole: secondaryRoleId,
+                  yearsOfExperience:
+                    toOptionalNumber(bioExperience.yearsOfExperience) ?? null,
+                  bio: String(bioExperience.bio || "").trim(),
+                  startupIdea: String(
+                    idea || bioExperience.startupIdea || "",
+                  ).trim(),
+                  fundingStage: fundingStageId,
+                  riskAppetite: riskAppetiteId,
+                  employmentType: employmentTypeId,
+                  companyName: String(bioExperience.companyName || "").trim(),
+                  location: String(bioExperience.location || "").trim(),
+                  locationType: locationTypeId,
+                },
+                compensation: {
+                  cashEquityExpectation: cashEquityExpectationId ?? 1,
+                  expectedMinimumSalary: expectedMinimumSalaryId ?? 2,
+                  salaryDuration: toOptionalNumber(compensation.salaryDurationId) ?? 1,
+                  currency: toOptionalNumber(compensation.currencyId) ?? 1,
+                  amount,
+                },
+                company_size_interest: COMPANY_SIZE_FIELDS.flatMap((field, index) =>
+                  companySizeInterestIds[index] == null
+                    ? []
+                    : [
+                        {
+                          company_size: index + 1,
+                          interest_level: companySizeInterestIds[index],
+                        },
+                      ],
+                ),
+                workAuthorization: workAuthorizationId,
+              },
+            }
+          : {}),
+        userAbout: {
+          industries: industryIds.filter((value) => value !== null),
+          priorStartupExperience: priorStartupExperienceId,
+        },
+        userProfile: {
+          name: profileNameValue,
+          age: profileAge,
+          location: {
+            city: locationCityId,
+            country: locationCountryId,
+            preference: normalizedLocationPreferences,
+          },
+          linkedInUrl: String(
+            linkedinUrl ||
+              profileDetails?.linkedInUrl ||
+              profile?.linkedinUrl ||
+              profile?.linkedin_url ||
+              "",
+          ).trim(),
+          schedulingLink: String(
+            schedulingLink ??
+              profileDetails?.schedulingLink ??
+              profileDetails?.scheduling_link ??
+              profile?.schedulingLink ??
+              profile?.scheduling_link ??
+              "",
+          ).trim(),
+          experiences: {
+            linkedinJobExperiences: experiencesForSave.linkedin
+              .map((experience) => normalizeHistoryItem(experience, "experience"))
+              .filter((experience) => experience.title || experience.company),
+            additionalJobExperiences: experiencesForSave.additional
+              .map((experience) => normalizeHistoryItem(experience, "experience"))
+              .filter((experience) => experience.title || experience.company),
+          },
+          education: {
+            linkedInEducation: educationForSave.linkedin
+              .map((education) => normalizeHistoryItem(education, "education"))
+              .filter((education) => education.school || education.degree),
+            additionalEducation: educationForSave.additional
+              .map((education) => normalizeHistoryItem(education, "education"))
+              .filter((education) => education.school || education.degree),
+          },
+        },
+      };
+
+      const response = await apiFetch("/users/me/profile/edit", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          ...(firebaseToken
+            ? { Authorization: `Bearer ${firebaseToken}` }
+            : {}),
+        },
+        body: JSON.stringify(payload),
+      });
+      let responsePayload = null;
+      try {
+        responsePayload = await response.json();
+      } catch {
+        responsePayload = null;
+      }
+
+      if (!response.ok) {
+        throw new Error(
+          responsePayload?.detail ||
+            responsePayload?.message ||
+            `Profile save failed with status ${response.status}`,
+        );
+      }
+
+      onSave?.(payload, responsePayload);
+    } catch (error) {
+      setSaveError(
+        error?.message || "Could not save your profile. Please try again.",
+      );
+    } finally {
+      setIsSavingProfile(false);
+    }
+  }
+
   return (
     <View style={styles.screen}>
       <View style={styles.header}>
@@ -4947,12 +6408,24 @@ export default function ProfileEditScreen({
         <Text style={styles.headerTitle}>Profile</Text>
         <Pressable
           accessibilityRole="button"
-          onPress={onSave}
+          accessibilityState={{ disabled: isSavingProfile }}
+          disabled={isSavingProfile}
+          onPress={handleSaveProfile}
           style={styles.headerAction}
         >
-          <Text style={styles.saveText}>Save</Text>
+          {isSavingProfile ? (
+            <ActivityIndicator accessibilityLabel="Saving profile" color="#24bac4" />
+          ) : (
+            <Text style={styles.saveText}>Save</Text>
+          )}
         </Pressable>
       </View>
+
+      {saveError ? (
+        <Text accessibilityRole="alert" style={styles.saveError}>
+          {saveError}
+        </Text>
+      ) : null}
 
       <View style={styles.modeTabs}>
         {["Edit", "View"].map((tab) => (
@@ -5034,7 +6507,9 @@ export default function ProfileEditScreen({
               style={styles.headlineInput}
             >
               <Text style={styles.headlinePreview}>
-                {headline || "Write your headline here"}
+                {headline ||
+                  profile?.linkedinProfilePreview?.headline ||
+                  "Write your headline here"}
               </Text>
             </Pressable>
           </View>
@@ -6213,6 +7688,13 @@ function createStyles(metrics) {
     closeIcon: { color: "#7d879e", fontSize: scale(38), lineHeight: scale(42) },
     headerTitle: { color: "#080808", fontSize: scale(25), fontWeight: "700" },
     saveText: { color: "#24bac4", fontSize: scale(22), textAlign: "right" },
+    saveError: {
+      color: "#b42318",
+      fontSize: scale(14),
+      lineHeight: scale(20),
+      marginHorizontal: metrics.vw(5),
+      marginBottom: scale(8),
+    },
     modeTabs: {
       height: scale(50),
       flexDirection: "row",

@@ -17,18 +17,51 @@ import { withPlatformFontStyles } from '../utils/typography';
 
 function toCityModel(item) {
   if (typeof item === 'string') {
-    return { value: item, label: item, stateLabel: '' };
+    return { value: item, cityId: null, label: item, stateLabel: '' };
   }
 
-  const label = item?.city_name || item?.name || item?.city || item?.district || '';
+  const nestedCity = item?.city && typeof item.city === 'object' ? item.city : null;
+  const label =
+    item?.city_name ||
+    item?.name ||
+    (typeof item?.city === 'string' ? item.city : '') ||
+    item?.district ||
+    item?.label ||
+    nestedCity?.city_name ||
+    nestedCity?.name ||
+    nestedCity?.label ||
+    '';
   const stateLabel =
     item?.state_name || item?.state || item?.province_name || item?.province || '';
-  const value = item?.id ?? item?.city_id ?? item?.city_code ?? item?.code ?? label;
+  const cityId =
+    item?.cityId ??
+    item?.city_id ??
+    item?.id ??
+    item?.city_code ??
+    item?.code ??
+    item?.value ??
+    nestedCity?.cityId ??
+    nestedCity?.city_id ??
+    nestedCity?.id ??
+    nestedCity?.value;
+  const value = cityId ?? label;
 
   return {
     value,
+    cityId: cityId ?? null,
     label: label || value,
     stateLabel,
+    countryId:
+      item?.country_id ??
+      item?.countryId ??
+      item?.country?.country_id ??
+      item?.country?.id ??
+      item?.country ??
+      nestedCity?.country_id ??
+      nestedCity?.countryId ??
+      nestedCity?.country?.country_id ??
+      nestedCity?.country?.id ??
+      null,
   };
 }
 

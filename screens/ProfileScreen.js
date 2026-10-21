@@ -119,7 +119,10 @@ export default function ProfileScreen({
           firebaseToken={firebaseToken}
           initialDateOfBirth={dateOfBirth}
           onClose={() => setIsEditingProfile(false)}
-          onSave={() => setIsEditingProfile(false)}
+          onSave={async () => {
+            setIsEditingProfile(false);
+            await loadProfile();
+          }}
         />
       ) : (
         <>

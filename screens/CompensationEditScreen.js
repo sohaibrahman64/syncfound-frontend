@@ -32,8 +32,8 @@ function getInitialValue(value, ...keys) {
 function mapCompensationOptions(items, labelKey, idKey = "id") {
   if (!Array.isArray(items)) return [];
   return items
-    .map((item) => ({
-      id: item?.[idKey] ?? item?.id,
+    .map((item, index) => ({
+      id: item?.[idKey] ?? item?.id ?? index + 1,
       label: String(item?.[labelKey] ?? "").trim(),
     }))
     .filter((option) => option.label);
@@ -42,8 +42,8 @@ function mapCompensationOptions(items, labelKey, idKey = "id") {
 function mapCurrencies(items) {
   if (!Array.isArray(items)) return [];
   return items
-    .map((item) => ({
-      id: item?.currency_id ?? item?.id,
+    .map((item, index) => ({
+      id: item?.currency_id ?? item?.id ?? index + 1,
       code: String(item?.currency_code ?? "").trim(),
       name: String(item?.currency_name ?? "").trim(),
       symbol: String(item?.currency_symbol ?? "").trim(),
@@ -77,7 +77,6 @@ export default function CompensationEditScreen({
 }) {
   const styles = useMemo(() => createStyles(metrics), [metrics]);
   const [cashEquityOptions, setCashEquityOptions] = useState([]);
-  const [salaryOptions, setSalaryOptions] = useState([]);
   const [salaryDurationOptions, setSalaryDurationOptions] = useState([]);
   const [currencies, setCurrencies] = useState([]);
   const [selectedCashEquity, setSelectedCashEquity] = useState(null);
@@ -98,8 +97,10 @@ export default function CompensationEditScreen({
     String(
       getInitialValue(
         initialValue,
+        "amount",
+        "expectedMinimumSalaryAmount",
+        "expected_minimum_salary_amount",
         "expectedMinimumSalary",
-        "expected_minimum_salary",
       ) || "",
     ),
   );
@@ -128,21 +129,18 @@ export default function CompensationEditScreen({
         const cashOptions = mapCompensationOptions(
           data.cash_equity_expectations,
           "cash_equity_expectation",
-        );
-        const salaryChoices = mapCompensationOptions(
-          data.expected_minimum_salaries,
-          "expected_minimum_salary",
+          "cash_equity_expectation_id",
         );
         const durationChoices = mapCompensationOptions(
           data.salary_durations,
           "salary_duration",
+          "salary_duration_id",
         );
         const currencyChoices = mapCurrencies(data.currencies);
 
         if (!isMounted) return;
 
         setCashEquityOptions(cashOptions);
-        setSalaryOptions(salaryChoices);
         setSalaryDurationOptions(durationChoices);
         setCurrencies(currencyChoices);
 
@@ -155,7 +153,8 @@ export default function CompensationEditScreen({
         );
         setSelectedCashEquity(
           findOption(cashOptions, initialCashEquity) ||
-            cashOptions[Math.min(1, cashOptions.length - 1)] ||
+            findOption(cashOptions, 1) ||
+            cashOptions[0] ||
             null,
         );
 
@@ -168,7 +167,8 @@ export default function CompensationEditScreen({
         );
         setSelectedSalaryDuration(
           findOption(durationChoices, initialDuration) ||
-            durationChoices[Math.min(1, durationChoices.length - 1)] ||
+            findOption(durationChoices, 1) ||
+            durationChoices[0] ||
             null,
         );
 
@@ -179,16 +179,13 @@ export default function CompensationEditScreen({
             "currencyCode",
             "currency_id",
             "currency_code",
-          ) || "USD";
+          ) || 1;
         setSelectedCurrency(
           findOption(currencyChoices, initialCurrency) ||
+            findOption(currencyChoices, "USD") ||
             currencyChoices[0] ||
             null,
         );
-
-        if (!salaryAmount && salaryChoices.length) {
-          setSalaryAmount(salaryChoices[0].label);
-        }
       } catch {
         if (isMounted) {
           setErrorMessage("Could not load compensation options. Please try again.");
@@ -213,9 +210,9 @@ export default function CompensationEditScreen({
       minimumSalaryPreference,
       expectedMinimumSalary: salaryAmount,
       expectedMinimumSalaryId:
-        findOption(salaryOptions, salaryAmount)?.id ??
         initialValue.expectedMinimumSalaryId ??
-        null,
+        initialValue.expected_minimum_salary_id ??
+        2,
       salaryDurationId:
         selectedSalaryDuration?.id ?? initialValue.salaryDurationId ?? null,
       salaryDuration:
@@ -397,43 +394,11 @@ export default function CompensationEditScreen({
               accessibilityLabel="Minimum salary amount"
               value={salaryAmount}
               onChangeText={setSalaryAmount}
-              placeholder="Minimum salary"
+              placeholder="e.g. 250,000"
               placeholderTextColor="#a2a2a2"
               keyboardType="numeric"
               style={styles.salaryInput}
             />
-            {salaryOptions.length > 1 ? (
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.salarySuggestions}
-              >
-                {salaryOptions.map((option) => {
-                  const selected = salaryAmount === option.label;
-                  return (
-                    <Pressable
-                      key={String(option.id ?? option.label)}
-                      accessibilityRole="button"
-                      accessibilityState={{ selected }}
-                      onPress={() => setSalaryAmount(option.label)}
-                      style={[
-                        styles.salarySuggestion,
-                        selected && styles.salarySuggestionSelected,
-                      ]}
-                    >
-                      <Text
-                        style={[
-                          styles.salarySuggestionText,
-                          selected && styles.salarySuggestionTextSelected,
-                        ]}
-                      >
-                        {option.label}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </ScrollView>
-            ) : null}
           </>
         )}
       </ScrollView>
@@ -631,20 +596,5 @@ function createStyles(metrics) {
       color: "#111111",
       fontSize: scale(18),
     },
-    salarySuggestions: {
-      gap: scale(10),
-      paddingTop: scale(12),
-      paddingHorizontal: scale(8),
-    },
-    salarySuggestion: {
-      minHeight: scale(38),
-      justifyContent: "center",
-      paddingHorizontal: scale(14),
-      borderRadius: scale(20),
-      backgroundColor: "#dfe2e7",
-    },
-    salarySuggestionSelected: { backgroundColor: "#2dbcc4" },
-    salarySuggestionText: { color: "#596174", fontSize: scale(15) },
-    salarySuggestionTextSelected: { color: "#ffffff" },
   }));
 }
