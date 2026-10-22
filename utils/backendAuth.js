@@ -20,6 +20,7 @@ const FIREBASE_SIGNIN_PATH = "/auth/firebase-signin";
 const USER_EMAIL_UPDATE_PATH = "/users/me/email";
 const USER_PROFILE_PATH =
   process.env.EXPO_PUBLIC_USER_PROFILE_PATH || "/users/me/profile";
+const USER_PROFILE_EDIT_PATH = "/users/me/profile/edit";
 const USER_PROFILE_INDUSTRIES_PATH = "/users/me/profile/industries";
 const PROMPTS_PATH = "/prompts";
 const LINKEDIN_INGEST_PATH =
@@ -359,6 +360,26 @@ export async function getMyProfile(firebaseToken = "") {
       response,
       payload,
       `Failed to load profile with status ${response.status}`,
+    );
+  }
+
+  return payload?.data && typeof payload.data === "object"
+    ? payload.data
+    : payload || {};
+}
+
+export async function getMyProfileEdit(firebaseToken = "") {
+  const response = await apiFetch(USER_PROFILE_EDIT_PATH, {
+    method: "GET",
+    headers: createAuthHeaders(firebaseToken),
+  });
+
+  const payload = await parseJsonResponse(response);
+  if (!response.ok) {
+    throw createHttpError(
+      response,
+      payload,
+      `Failed to load editable profile with status ${response.status}`,
     );
   }
 

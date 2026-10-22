@@ -3874,6 +3874,17 @@ function getProfilePromptEntries(profile) {
   });
 }
 
+function hasProfileData(value) {
+  if (value === null || value === undefined) return false;
+  if (typeof value === "string") return value.trim().length > 0;
+  if (typeof value === "number" || typeof value === "boolean") return true;
+  if (Array.isArray(value)) return value.some(hasProfileData);
+  if (typeof value === "object") {
+    return Object.values(value).some(hasProfileData);
+  }
+  return false;
+}
+
 function toOptionalNumber(value) {
   const candidate =
     value && typeof value === "object"
@@ -4082,15 +4093,28 @@ function normalizeProfileCompanySizeSelections(value) {
   if (!Array.isArray(value)) return selections;
 
   value.forEach((item) => {
-    const companySizeId = toOptionalNumber(item?.company_size ?? item?.companySize);
+    const companySizeId = toOptionalNumber(
+      item?.company_size ??
+        item?.company_size_id ??
+        item?.companySizeId ??
+        item?.companySize,
+    );
     const field = COMPANY_SIZE_FIELDS[companySizeId - 1];
     if (!field) return;
 
-    const interest =
+    const interestId =
       item?.selected_interest_level ??
       item?.interest_level ??
+      item?.interest_level_id ??
       item?.company_size_interest_level ??
+      item?.company_size_interest_level_id ??
+      item?.interestLevelId ??
       item?.value;
+    const interestAnswer =
+      item?.interestLevelAnswer ?? item?.interest_level_answer;
+    const interest = interestAnswer
+      ? { id: interestId, label: interestAnswer }
+      : interestId;
     const normalized = normalizeCompanySizeSelections({
       [field.key]: interest,
     })[field.key];
@@ -4222,13 +4246,17 @@ function getInitialProfileHistory(profile, profileDetails, type) {
 }
 
 export default function ProfileEditScreen({
-  profile = {},
+  profile: fallbackProfile = {},
+  editableProfile = {},
   profileImageUrl = "",
   firebaseToken = "",
   initialDateOfBirth = "",
   onClose,
   onSave,
 }) {
+  const profile = hasProfileData(editableProfile)
+    ? editableProfile
+    : fallbackProfile;
   const metrics = useResponsiveMetrics();
   const styles = createStyles(metrics);
   const founderBackground =
@@ -4297,6 +4325,12 @@ export default function ProfileEditScreen({
     profile?.userSkills ??
     profile?.user_skills ??
     [];
+  const hasProfileUserSkills = [
+    founderBackground?.userSkills,
+    founderBackground?.user_skills,
+    profile?.userSkills,
+    profile?.user_skills,
+  ].some((value) => value !== undefined && value !== null);
   const initialIndustrySelections =
     aboutDetails?.industries ??
     aboutDetails?.industryInterests ??
@@ -4305,6 +4339,14 @@ export default function ProfileEditScreen({
     profile?.industryInterests ??
     profile?.industry_interests ??
     [];
+  const hasProfileIndustrySelections = [
+    aboutDetails?.industries,
+    aboutDetails?.industryInterests,
+    aboutDetails?.industry_interests,
+    profile?.industries,
+    profile?.industryInterests,
+    profile?.industry_interests,
+  ].some((value) => value !== undefined && value !== null);
   const initialStartupExperience = getProfileTextList(
     aboutDetails?.priorStartupExperience ??
       aboutDetails?.prior_startup_experience ??
@@ -4398,29 +4440,35 @@ export default function ProfileEditScreen({
       ? initialFounderGoal.matching_goal ||
         initialFounderGoal.label ||
         initialFounderGoal.name ||
-        MATCHING_GOALS[(toOptionalNumber(initialFounderGoal.answer) || 0) - 1] ||
+        initialFounderGoal.answer ||
+        MATCHING_GOALS[(toOptionalNumber(initialFounderGoal) || 0) - 1] ||
         "Have some ideas but open to exploring"
       : MATCHING_GOALS[(toOptionalNumber(initialFounderGoal) || 0) - 1] ||
         initialFounderGoal,
   );
   const [commitmentLevel, setCommitmentLevel] = useState(
-    COMMITMENT_LEVELS[(toOptionalNumber(initialCommitment) || 0) - 1] ||
+    (typeof initialCommitment === "object"
+      ? initialCommitment.commitment_level ||
+        initialCommitment.answer ||
+        initialCommitment.label ||
+        initialCommitment.name
+      : "") ||
+      COMMITMENT_LEVELS[(toOptionalNumber(initialCommitment) || 0) - 1] ||
       (typeof initialCommitment === "object"
-        ? initialCommitment.commitment_level ||
-          initialCommitment.label ||
-          initialCommitment.name ||
-          "Ready to go full-time with the right cofounder"
+        ? "Ready to go full-time with the right cofounder"
         : initialCommitment),
   );
   const [priorStartupExperience, setPriorStartupExperience] = useState(
-    PRIOR_STARTUP_EXPERIENCE_OPTIONS[
-      (toOptionalNumber(
-        aboutDetails?.priorStartupExperience ??
-          aboutDetails?.prior_startup_experience ??
-          profile?.priorStartupExperience ??
-          profile?.prior_startup_experience,
-      ) || 0) - 1
-    ] || initialStartupExperience || "No prior startup experience",
+    initialStartupExperience ||
+      PRIOR_STARTUP_EXPERIENCE_OPTIONS[
+        (toOptionalNumber(
+          aboutDetails?.priorStartupExperience ??
+            aboutDetails?.prior_startup_experience ??
+            profile?.priorStartupExperience ??
+            profile?.prior_startup_experience,
+        ) || 0) - 1
+      ] ||
+      "No prior startup experience",
   );
   const [founderCount, setFounderCount] = useState(() =>
     toOptionalNumber(
@@ -4431,11 +4479,39 @@ export default function ProfileEditScreen({
     ) ?? 0,
   );
   const [selectedSkills, setSelectedSkills] = useState(() =>
-    Array.isArray(initialUserSkills) ? initialUserSkills : [],
+    Array.isArray(initialUserSkills)
+      ? initialUserSkills
+          .map((skill) => {
+            const skillId = toOptionalNumber(skill);
+            if (skillId !== null) return skillId;
+            if (typeof skill === "string") return skill;
+            return skill?.answer || skill?.skill_name || skill?.name || skill?.label || "";
+          })
+          .filter(Boolean)
+      : [],
   );
-  const [initialSkills, setInitialSkills] = useState([]);
+  const [initialSkills, setInitialSkills] = useState(() =>
+    Array.isArray(initialUserSkills)
+      ? initialUserSkills
+          .map((skill) =>
+            typeof skill === "object"
+              ? skill.answer || skill.skill_name || skill.name || skill.label || ""
+              : "",
+          )
+          .filter(Boolean)
+      : [],
+  );
   const [selectedIndustries, setSelectedIndustries] = useState(() =>
-    Array.isArray(initialIndustrySelections) ? initialIndustrySelections : [],
+    Array.isArray(initialIndustrySelections)
+      ? initialIndustrySelections
+          .map((industry) => {
+            const industryId = toOptionalNumber(industry);
+            if (industryId !== null) return industryId;
+            if (typeof industry === "string") return industry;
+            return industry?.answer || industry?.industry_name || industry?.name || industry?.label || "";
+          })
+          .filter(Boolean)
+      : [],
   );
   const [industryOptions, setIndustryOptions] = useState([]);
   const [skillOptions, setSkillOptions] = useState([]);
@@ -4463,6 +4539,8 @@ export default function ProfileEditScreen({
       initialJobSearchProfile?.jobSearchAnswer ??
       initialJobSearchProfile?.job_search_answer ??
       initialJobSearchProfile?.status ??
+      initialJobSearchProfile?.answer ??
+      initialJobSearchProfile?.id ??
       JOB_SEARCH_STATUS_OPTIONS[0];
     const selectedWorkTypes =
       initialJobSearchProfile?.jobSearchWorkType ??
@@ -4571,12 +4649,18 @@ export default function ProfileEditScreen({
           : toOptionalNumber(values.cashEquityExpectation) ?? null),
       cashEquityExpectation:
         typeof cashExpectation === "object"
-          ? cashExpectation.cash_equity_expectation ?? cashExpectation.label ?? ""
+          ? cashExpectation.cash_equity_expectation ??
+            cashExpectation.answer ??
+            cashExpectation.label ??
+            ""
           : cashExpectation,
       minimumSalaryPreference:
         values.minimumSalaryPreference ??
         values.expectedMinimumSalaryPreference ??
         values.expected_minimum_salary_preference ??
+        (typeof values.expectedMinimumSalary === "object"
+          ? values.expectedMinimumSalary.answer
+          : undefined) ??
         "",
       expectedMinimumSalary: String(
         values.amount ??
@@ -4589,6 +4673,7 @@ export default function ProfileEditScreen({
       expectedMinimumSalaryId:
         values.expected_minimum_salary_id ??
         values.expectedMinimumSalaryId ??
+        toOptionalNumber(values.expectedMinimumSalary) ??
         toOptionalNumber(values.expected_minimum_salary) ??
         null,
       salaryDurationId:
@@ -4598,7 +4683,10 @@ export default function ProfileEditScreen({
         (typeof salaryDuration === "object" ? salaryDuration.id : null),
       salaryDuration:
         typeof salaryDuration === "object"
-          ? salaryDuration.salary_duration ?? salaryDuration.label ?? ""
+          ? salaryDuration.salary_duration ??
+            salaryDuration.answer ??
+            salaryDuration.label ??
+            ""
           : salaryDuration,
       currencyId:
         values.currency_id ??
@@ -4611,9 +4699,10 @@ export default function ProfileEditScreen({
         values.currency_code ??
         values.currencyCode ??
         currency.currency_code ??
+        currency.answer ??
         "",
       currencyName:
-        values.currency_name ?? currency.currency_name ?? "",
+        values.currency_name ?? currency.currency_name ?? currency.answer ?? "",
       currencySymbol:
         values.currency_symbol ?? currency.currency_symbol ?? "",
     };
@@ -4621,6 +4710,7 @@ export default function ProfileEditScreen({
   const [companySizeInterests, setCompanySizeInterests] = useState(() =>
     normalizeProfileCompanySizeSelections(
       talentBackground?.company_size_interest ??
+        talentBackground?.companySizeInterest ??
         talentBackground?.companySizeInterests ??
         profile?.companySizeInterests ??
         profile?.companySizeInterestLevels ??
@@ -4648,7 +4738,7 @@ export default function ProfileEditScreen({
   );
   const [profileName, setProfileName] = useState(() => {
     const fullName = String(
-      profileDetails?.name || profile?.displayName || profile?.full_name || profile?.name || "",
+      editableProfile?.name || profileDetails?.name || profile?.displayName || profile?.full_name || profile?.name || "",
     ).trim();
     const [firstName = "", ...lastNameParts] = fullName.split(/\s+/);
     return {
@@ -4912,7 +5002,9 @@ export default function ProfileEditScreen({
 
         if (isMounted) {
           setIndustryOptions(mapped);
-          setSelectedIndustries(selected);
+          if (!hasProfileIndustrySelections && selected.length > 0) {
+            setSelectedIndustries(selected);
+          }
         }
       } catch (error) {
         console.error("Failed to fetch user industries", error);
@@ -4963,8 +5055,10 @@ export default function ProfileEditScreen({
             .slice(0, MAX_SKILLS_SELECTION);
 
           setSkillOptions(mapped);
-          setSelectedSkills(selected);
-          setInitialSkills(initialSkills);
+          if (!hasProfileUserSkills && selected.length > 0) {
+            setSelectedSkills(selected);
+            setInitialSkills(initialSkills);
+          }
         } catch (error) {
           console.error("Failed to fetch user skills", error);
         }
@@ -5601,7 +5695,9 @@ export default function ProfileEditScreen({
             profile?.locationPreference ??
             [],
         }}
-        locationPreferenceQuestions={profile.locationPreferenceQuestions || []}
+        locationPreferenceQuestions={getProfileLocationPreferenceQuestions(
+          profile,
+        )}
         onDone={(value) => {
           setProfileLocation(value);
           setEditingProfileField("");
@@ -5706,6 +5802,10 @@ export default function ProfileEditScreen({
     .filter(Boolean)
     .join(", ");
   const workAuthorizationSummary = getWorkAuthorizationLabel(workAuthorization);
+  const profileNameSummary = [profileName?.firstName, profileName?.lastName]
+    .map((part) => String(part || "").trim())
+    .filter((part) => part && part.toLowerCase() !== "undefined")
+    .join(" ");
 
   const previewDisplayName = [
     profileName?.firstName ?? profile?.firstName ?? profile?.first_name,
@@ -6762,12 +6862,7 @@ export default function ProfileEditScreen({
           <Text style={styles.sectionTitle}>My Profile</Text>
           <DetailRow
             title="Name"
-            value={
-              profile === null
-                ? "Sohaib Rahman"
-                : `${profile.firstName} ${profile.lastName}`.trim() ||
-                  "Not Selected"
-            }
+            value={profileNameSummary || "Not Selected"}
             onPress={() => setEditingProfileField("name")}
             styles={styles}
           />
@@ -6888,7 +6983,9 @@ function getProfileTextList(value) {
     ? value
     : typeof value === "string"
       ? value.split(/[,;\n]/)
-      : [];
+      : value && typeof value === "object"
+        ? [value]
+        : [];
 
   return values
     .map((item) => {
@@ -6898,6 +6995,7 @@ function getProfileTextList(value) {
             item.name ||
             item.industry_name ||
             item.skill_name ||
+            item.answer ||
             item.title ||
             item.value ||
             "",
@@ -7006,8 +7104,30 @@ function getLocationPreferenceText(profile, editedLocation) {
   return "";
 }
 
+function getProfileLocationPreferenceQuestions(profile) {
+  const profileDetails = profile?.userProfile || profile?.user_profile || {};
+  const location =
+    profileDetails?.location ||
+    profile?.locationDetails ||
+    profile?.location_details ||
+    {};
+
+  return [
+    profile?.locationPreferenceQuestions,
+    profile?.location_preference_questions,
+    location?.questions,
+    location?.locationPreferenceQuestions,
+    location?.location_preference_questions,
+  ].find(Array.isArray) || [];
+}
+
 function getLocationSummary(profile, editedLocation) {
-  const locationDetails = profile?.locationDetails || {};
+  const profileDetails = profile?.userProfile || profile?.user_profile || {};
+  const locationDetails =
+    profile?.locationDetails ||
+    profile?.location_details ||
+    profileDetails?.location ||
+    {};
 
   const city =
     editedLocation?.city ??
@@ -7019,14 +7139,14 @@ function getLocationSummary(profile, editedLocation) {
   const country =
     locationDetails.selected_country || profile?.selected_country || "";
 
-  const questions = Array.isArray(profile?.locationPreferenceQuestions)
-    ? profile.locationPreferenceQuestions
-    : [];
+  const questions = getProfileLocationPreferenceQuestions(profile);
 
   const savedAnswers =
     editedLocation?.selectedAnswers !== undefined
       ? editedLocation.selectedAnswers
-      : profile?.locationPreference;
+      : locationDetails?.preference ??
+        profile?.locationPreference ??
+        profile?.location_preference;
 
   const normalizedAnswers = Array.isArray(savedAnswers)
     ? savedAnswers

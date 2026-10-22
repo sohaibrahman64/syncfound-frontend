@@ -14,7 +14,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useResponsiveMetrics } from "../utils/responsive";
 import { BASE_URL_NO_API } from "../utils/Constants";
-import { getMyProfile } from "../utils/backendAuth";
+import { getMyProfile, getMyProfileEdit } from "../utils/backendAuth";
 import { withPlatformFontStyles } from "../utils/typography";
 import BottomNavigation from "../components/BottomNavigation";
 import ProfileEditScreen from "./ProfileEditScreen";
@@ -66,6 +66,7 @@ export default function ProfileScreen({
   const insets = useSafeAreaInsets();
   const styles = createStyles(metrics, insets);
   const [profile, setProfile] = useState(null);
+  const [editableProfile, setEditableProfile] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
   const [isEditingProfile, setIsEditingProfile] = useState(false);
@@ -74,7 +75,12 @@ export default function ProfileScreen({
     setIsLoading(true);
     setErrorMessage("");
     try {
-      setProfile(await getMyProfile(firebaseToken));
+      const [profileData, editableProfileData] = await Promise.all([
+        getMyProfile(firebaseToken),
+        getMyProfileEdit(firebaseToken),
+      ]);
+      setProfile(profileData);
+      setEditableProfile(editableProfileData);
     } catch (error) {
       if (error?.status === 401) {
         onAuthExpired?.();
@@ -115,7 +121,10 @@ export default function ProfileScreen({
       {isEditingProfile ? (
         <ProfileEditScreen
           profile={profile}
-          profileImageUrl={profileImageUrl}
+          editableProfile={editableProfile}
+          profileImageUrl={resolveProfileImageUrl(
+            editableProfile?.profileImageUri || profile?.profileImageUri,
+          )}
           firebaseToken={firebaseToken}
           initialDateOfBirth={dateOfBirth}
           onClose={() => setIsEditingProfile(false)}
