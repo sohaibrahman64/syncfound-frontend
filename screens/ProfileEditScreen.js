@@ -1496,8 +1496,12 @@ function LocationProfileEditScreen({
       : [];
 
     const answersFromList = savedAnswers.reduce((accumulator, item) => {
-      const questionId = item?.question_id ?? item?.id;
-      const answerId = item?.selected_answer_id ?? item?.answer_id;
+      const questionId = item?.question_id ?? item?.questionId ?? item?.id;
+      const answerId =
+        item?.selected_answer_id ??
+        item?.selectedAnswerId ??
+        item?.answer_id ??
+        item?.answerId;
 
       if (questionId != null && answerId != null) {
         accumulator[String(questionId)] = String(answerId);
@@ -1518,7 +1522,10 @@ function LocationProfileEditScreen({
       (accumulator, [questionId, answer]) => {
         const answerId =
           answer && typeof answer === "object"
-            ? (answer.selected_answer_id ?? answer.answer_id)
+            ? (answer.selected_answer_id ??
+              answer.selectedAnswerId ??
+              answer.answer_id ??
+              answer.answerId)
             : answer;
 
         if (answerId != null) {
@@ -1674,16 +1681,18 @@ function LocationProfileEditScreen({
             accessibilityRole="button"
             accessibilityLabel="Select City"
             onPress={() => setIsPickingCity(true)}
-            style={styles.profileDateInput}
+            style={styles.locationCityDropdown}
           >
             <Text
               style={[
                 styles.profileDateText,
+                styles.locationCityDropdownText,
                 !city && styles.profileFieldPlaceholder,
               ]}
             >
               {city || "Select City"}
             </Text>
+            <Text style={styles.locationCityDropdownArrow}>▼</Text>
           </Pressable>
         </View>
         {locationPreferenceQuestions.map((question) => {
@@ -3885,6 +3894,10 @@ function hasProfileData(value) {
   return false;
 }
 
+function getFirstNonEmptyArray(...values) {
+  return values.find((value) => Array.isArray(value) && value.length > 0) || [];
+}
+
 function toOptionalNumber(value) {
   const candidate =
     value && typeof value === "object"
@@ -4308,6 +4321,37 @@ export default function ProfileEditScreen({
     profile?.locationDetails ??
     profile?.location_details ??
     {};
+  const initialLocationPreferences = getFirstNonEmptyArray(
+    editableProfile?.locationPreferences,
+    editableProfile?.locationPreference,
+    editableProfile?.location_preference,
+    editableProfile?.userProfile?.locationPreferences,
+    editableProfile?.userProfile?.location?.locationPreferences,
+    editableProfile?.userProfile?.location?.preference,
+    editableProfile?.user_profile?.locationPreferences,
+    editableProfile?.user_profile?.location?.locationPreferences,
+    editableProfile?.user_profile?.location?.preference,
+    editableProfile?.locationDetails?.locationPreferences,
+    editableProfile?.locationDetails?.preference,
+    fallbackProfile?.locationPreferences,
+    fallbackProfile?.locationPreference,
+    fallbackProfile?.location_preference,
+    fallbackProfile?.userProfile?.locationPreferences,
+    fallbackProfile?.userProfile?.location?.locationPreferences,
+    fallbackProfile?.userProfile?.location?.preference,
+    fallbackProfile?.user_profile?.locationPreferences,
+    fallbackProfile?.user_profile?.location?.locationPreferences,
+    fallbackProfile?.user_profile?.location?.preference,
+    fallbackProfile?.locationDetails?.locationPreferences,
+    fallbackProfile?.locationDetails?.preference,
+    initialUserLocation?.locationPreferences,
+    initialUserLocation?.preference,
+    initialUserLocation?.selectedAnswers,
+    profile?.locationDetails?.
+    profile?.locationPreferences,
+    profile?.locationPreference,
+    profile?.location_preference,
+  );
   const initialPromptEntries = getProfilePromptEntries(profile);
   const initialExperienceHistory = getInitialProfileHistory(
     profile,
@@ -4823,11 +4867,7 @@ export default function ProfileEditScreen({
           ["country_id", "id"],
         ) ?? null,
       selectedAnswers:
-        initialUserLocation?.selectedAnswers ??
-        initialUserLocation?.preference ??
-        profile?.locationPreference ??
-        profile?.location_preference ??
-        [],
+        initialLocationPreferences,
     }),
   );
   const [linkedinUrl, setLinkedinUrl] = useState(
@@ -7952,6 +7992,25 @@ function createStyles(metrics) {
     profileDateText: {
       color: "#333",
       fontSize: scale(18),
+    },
+    locationCityDropdown: {
+      minHeight: scale(58),
+      paddingHorizontal: scale(4),
+      borderWidth: 0,
+      borderBottomWidth: scale(2),
+      borderBottomColor: "#e2e0d8",
+      backgroundColor: "transparent",
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+    },
+    locationCityDropdownText: {
+      flex: 1,
+    },
+    locationCityDropdownArrow: {
+      color: "#7d879e",
+      fontSize: scale(13),
+      marginLeft: scale(10),
     },
     profileAgeText: {
       color: "#7d879e",
