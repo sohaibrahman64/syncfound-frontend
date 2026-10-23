@@ -69,6 +69,7 @@ export default function ProfileEditPictureScreen({
   initialTranslateX = 0,
   initialTranslateY = 0,
   initialCropRect = null,
+  initialImageUploaded = false,
   profileEditTheme = false,
 }) {
   const metrics = useResponsiveMetrics();
@@ -180,6 +181,7 @@ export default function ProfileEditPictureScreen({
       profileImageCropRect: cropRect,
       pendingProfileImageUri: '',
       pendingProfileImageSource: '',
+      ...(initialImageUploaded ? { profileImageUploaded: true } : {}),
     });
   }
 

@@ -204,12 +204,16 @@ function resolveToAbsoluteUrl(value) {
 
 function extractUploadedImageUri(payload) {
   const candidates = [
+    payload?.profileImageUri,
+    payload?.profile_image_uri,
     payload?.image_url,
     payload?.imageUrl,
     payload?.url,
     payload?.uri,
     payload?.public_url,
     payload?.file_url,
+    payload?.data?.profileImageUri,
+    payload?.data?.profile_image_uri,
     payload?.data?.image_url,
     payload?.data?.imageUrl,
     payload?.data?.url,
@@ -1323,7 +1327,17 @@ export async function uploadProfileImage(imageUri, firebaseToken) {
   let uploadFile;
   let contentType;
 
-  if (/^https?:\/\//i.test(normalizedUri)) {
+  if (/^(blob|data):/i.test(normalizedUri)) {
+    // ImagePicker returns browser object URLs on web. They are readable with
+    // fetch, but are not filesystem paths accepted by expo-file-system's File.
+    const fileResponse = await fetch(normalizedUri);
+    if (!fileResponse.ok) {
+      throw new Error("Could not read the selected image for upload.");
+    }
+
+    uploadFile = await fileResponse.blob();
+    contentType = uploadFile?.type || getImageMimeTypeFromUri(normalizedUri);
+  } else if (/^https?:\/\//i.test(normalizedUri)) {
     const fileResponse = await expoFetch(normalizedUri);
     if (!fileResponse.ok) {
       throw new Error("Could not read the selected image for upload.");

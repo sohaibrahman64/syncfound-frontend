@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Image,
   Modal,
+  Platform,
   Pressable,
   SafeAreaView,
   StyleSheet,
@@ -87,6 +88,8 @@ export default function ProfilePhotoUploadScreen({
   initialProfileImageTranslateX = 0,
   initialProfileImageTranslateY = 0,
   initialProfileImageCropRect = null,
+  initialProfileImageNeedsEdit = false,
+  initialProfileImageUploaded = false,
   profileEditTheme = false,
   openSourceMenuOnMount = false,
 }) {
@@ -97,6 +100,10 @@ export default function ProfilePhotoUploadScreen({
     [metrics, insets.top, insets.bottom, profileEditTheme],
   );
   const [isDrawerVisible, setIsDrawerVisible] = useState(openSourceMenuOnMount);
+  const [needsEditAfterUpload, setNeedsEditAfterUpload] = useState(false);
+  const [isSelectedImageUploaded, setIsSelectedImageUploaded] = useState(
+    initialProfileImageUploaded || isBackendHostedUri(initialProfileImageUri),
+  );
   const [selectedImageUri, setSelectedImageUri] = useState(initialProfileImageUri);
   const [selectedImageSource, setSelectedImageSource] = useState(initialProfileImageSource);
   const [selectedImageOriginalUri, setSelectedImageOriginalUri] = useState(initialProfileImageUri);
@@ -112,6 +119,21 @@ export default function ProfilePhotoUploadScreen({
   const [uploadedImageUrlPath, setUploadedImageUrlPath] = useState('');
 
   const hasSelectedImage = Boolean(selectedImageUri);
+  const hasTemporaryImageUri = /^(blob|data):/i.test(
+    String(selectedImageUri ?? '').trim(),
+  );
+  const isLinkedinImageAwaitingUpload =
+    profileEditTheme &&
+    selectedImageSource === 'linkedin' &&
+    !isSelectedImageUploaded;
+  const canUploadSelectedImage =
+    hasSelectedImage && isLinkedinImageAwaitingUpload;
+  const isContinueDisabled =
+    !hasSelectedImage ||
+    hasTemporaryImageUri ||
+    isLinkedinImageAwaitingUpload ||
+    isUploadingPhoto ||
+    isRemovingPhoto;
 
   function isRemoteUri(value) {
     return /^https?:\/\//i.test(String(value ?? '').trim());
@@ -133,6 +155,74 @@ export default function ProfilePhotoUploadScreen({
     });
   }
 
+  async function handleUploadPress() {
+    if (!canUploadSelectedImage || isUploadingPhoto || isRemovingPhoto) {
+      return;
+    }
+
+    setIsUploadingPhoto(true);
+    setPhotoError('');
+
+    try {
+      const result = await uploadProfileImage(selectedImageUri, firebaseToken);
+      const uploadedUri = String(result?.imageUri ?? '').trim();
+      if (!uploadedUri) {
+        throw new Error('Upload completed but no image URL was returned.');
+      }
+
+      const uploadedUrlPath = extractStorageUrlPath(
+        result?.payload?.profileImageUri ||
+          result?.payload?.profile_image_uri ||
+          result?.payload?.url ||
+          uploadedUri,
+      );
+      setSelectedImageUri(uploadedUri);
+      setSelectedImageOriginalUri(uploadedUri);
+      setUploadedImageUrlPath(uploadedUrlPath);
+      setHasTriedLinkedinProxy(false);
+      setIsSelectedImageUploaded(true);
+    } catch (error) {
+      const message =
+        error instanceof Error && error.message
+          ? error.message
+          : 'Could not upload the LinkedIn photo. Please try again.';
+      setPhotoError(message);
+    } finally {
+      setIsUploadingPhoto(false);
+    }
+  }
+
+  function handleContinuePress() {
+    if (isContinueDisabled) {
+      return;
+    }
+
+    const fields = {
+      profileImageUri: selectedImageUri,
+      profileImageSource: selectedImageSource,
+      profileImageRotation: selectedImageRotation,
+      profileImageScale: selectedImageScale,
+      profileImageTranslateX: selectedImageTranslateX,
+      profileImageTranslateY: selectedImageTranslateY,
+      profileImageCropRect: selectedImageCropRect,
+    };
+
+    if (
+      profileEditTheme &&
+      (needsEditAfterUpload || initialProfileImageNeedsEdit)
+    ) {
+      onContinue?.({
+        ...fields,
+        pendingProfileImageUri: selectedImageUri,
+        pendingProfileImageSource: selectedImageSource || 'linkedin',
+        profileImageUploaded: isSelectedImageUploaded,
+      });
+      return;
+    }
+
+    onContinue?.(fields);
+  }
+
   useEffect(() => {
     setSelectedImageUri(initialProfileImageUri);
     setSelectedImageSource(initialProfileImageSource);
@@ -143,6 +233,10 @@ export default function ProfilePhotoUploadScreen({
     setSelectedImageTranslateY(Number(initialProfileImageTranslateY) || 0);
     setSelectedImageCropRect(initialProfileImageCropRect);
     setUploadedImageUrlPath(extractStorageUrlPath(initialProfileImageUri));
+    setIsSelectedImageUploaded(
+      Boolean(initialProfileImageUploaded) ||
+        isBackendHostedUri(initialProfileImageUri),
+    );
     setHasTriedLinkedinProxy(false);
     setPhotoError('');
   }, [
@@ -153,6 +247,7 @@ export default function ProfilePhotoUploadScreen({
     initialProfileImageTranslateX,
     initialProfileImageTranslateY,
     initialProfileImageCropRect,
+    initialProfileImageUploaded,
   ]);
 
   useEffect(() => {
@@ -166,6 +261,7 @@ export default function ProfilePhotoUploadScreen({
       !normalizedUri
       || (isRemoteImage && !isLinkedinSource)
       || isAlreadyUploadedLinkedin
+      || initialProfileImageUploaded
     ) {
       return undefined;
     }
@@ -192,6 +288,7 @@ export default function ProfilePhotoUploadScreen({
         setSelectedImageUri(uploadedUri);
         setSelectedImageOriginalUri(uploadedUri);
         setUploadedImageUrlPath(uploadedUrlPath);
+        setIsSelectedImageUploaded(true);
       } catch (error) {
         if (isCancelled) {
           return;
@@ -214,10 +311,32 @@ export default function ProfilePhotoUploadScreen({
     return () => {
       isCancelled = true;
     };
-  }, [firebaseToken, initialProfileImageSource, initialProfileImageUri]);
+  }, [
+    firebaseToken,
+    initialProfileImageSource,
+    initialProfileImageUploaded,
+    initialProfileImageUri,
+  ]);
 
   async function handleRemovePress() {
     if (!hasSelectedImage || isRemovingPhoto || isUploadingPhoto) {
+      return;
+    }
+
+    if (isLinkedinImageAwaitingUpload) {
+      setSelectedImageUri('');
+      setSelectedImageSource('');
+      setSelectedImageOriginalUri('');
+      setSelectedImageRotation(0);
+      setSelectedImageScale(1);
+      setSelectedImageTranslateX(0);
+      setSelectedImageTranslateY(0);
+      setSelectedImageCropRect(null);
+      setUploadedImageUrlPath('');
+      setIsSelectedImageUploaded(false);
+      setNeedsEditAfterUpload(false);
+      setHasTriedLinkedinProxy(false);
+      setPhotoError('');
       return;
     }
 
@@ -243,6 +362,8 @@ export default function ProfilePhotoUploadScreen({
       setSelectedImageTranslateY(0);
       setSelectedImageCropRect(null);
       setUploadedImageUrlPath('');
+      setIsSelectedImageUploaded(false);
+      setNeedsEditAfterUpload(false);
       setHasTriedLinkedinProxy(false);
     } catch (error) {
       const message =
@@ -265,6 +386,22 @@ export default function ProfilePhotoUploadScreen({
 
     setPhotoError('');
     setIsDrawerVisible(false);
+
+    if (profileEditTheme) {
+      setSelectedImageUri(linkedinPhotoUrl);
+      setSelectedImageOriginalUri(linkedinPhotoUrl);
+      setSelectedImageSource('linkedin');
+      setSelectedImageRotation(0);
+      setSelectedImageScale(1);
+      setSelectedImageTranslateX(0);
+      setSelectedImageTranslateY(0);
+      setSelectedImageCropRect(DEFAULT_CROP_RECT);
+      setUploadedImageUrlPath('');
+      setHasTriedLinkedinProxy(false);
+      setIsSelectedImageUploaded(false);
+      setNeedsEditAfterUpload(true);
+      return;
+    }
 
     onContinue?.({
       pendingProfileImageUri: linkedinPhotoUrl,
@@ -324,11 +461,13 @@ export default function ProfilePhotoUploadScreen({
 
   async function handleGallerySelection() {
     try {
-      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (Platform.OS !== 'web') {
+        const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
 
-      if (permission.status !== 'granted') {
-        setPhotoError('Photo library permission is required to upload from gallery.');
-        return;
+        if (permission.status !== 'granted') {
+          setPhotoError('Photo library permission is required to upload from gallery.');
+          return;
+        }
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
@@ -450,15 +589,31 @@ export default function ProfilePhotoUploadScreen({
             <Pressable
               style={[
                 styles.uploadPictureButton,
-                hasSelectedImage && styles.uploadPictureButtonDisabled,
+                ((hasSelectedImage && !canUploadSelectedImage) ||
+                  isUploadingPhoto ||
+                  isRemovingPhoto) &&
+                  styles.uploadPictureButtonDisabled,
               ]}
-              onPress={() => setIsDrawerVisible(true)}
-              disabled={hasSelectedImage}
+              onPress={() => {
+                if (canUploadSelectedImage) {
+                  handleUploadPress();
+                } else if (!hasSelectedImage) {
+                  setIsDrawerVisible(true);
+                }
+              }}
+              disabled={
+                (hasSelectedImage && !canUploadSelectedImage) ||
+                isUploadingPhoto ||
+                isRemovingPhoto
+              }
             >
               <Text
                 style={[
                   styles.uploadPictureButtonText,
-                  hasSelectedImage && styles.uploadPictureButtonTextDisabled,
+                  ((hasSelectedImage && !canUploadSelectedImage) ||
+                    isUploadingPhoto ||
+                    isRemovingPhoto) &&
+                    styles.uploadPictureButtonTextDisabled,
                 ]}
               >
                 Upload Picture
@@ -494,24 +649,15 @@ export default function ProfilePhotoUploadScreen({
         <Pressable
           style={[
             styles.continueButton,
-            (!selectedImageUri || isUploadingPhoto || isRemovingPhoto) && styles.continueButtonDisabled,
+            isContinueDisabled && styles.continueButtonDisabled,
           ]}
-          disabled={!selectedImageUri || isUploadingPhoto || isRemovingPhoto}
-          onPress={() =>
-            onContinue?.({
-              profileImageUri: selectedImageUri,
-              profileImageSource: selectedImageSource,
-              profileImageRotation: selectedImageRotation,
-              profileImageScale: selectedImageScale,
-              profileImageTranslateX: selectedImageTranslateX,
-              profileImageTranslateY: selectedImageTranslateY,
-              profileImageCropRect: selectedImageCropRect,
-            })}
+          disabled={isContinueDisabled}
+          onPress={handleContinuePress}
         >
           <Text
             style={[
               styles.continueButtonText,
-              !selectedImageUri && styles.continueButtonTextDisabled,
+              isContinueDisabled && styles.continueButtonTextDisabled,
             ]}
           >
             Continue

@@ -4092,7 +4092,9 @@ function normalizeHistoryItem(item, type) {
 
 function getProfileImagePath(value) {
   const uri = String(value ?? "").trim();
-  if (!/^https?:\/\//i.test(uri)) return uri;
+  if (!/^https?:\/\//i.test(uri)) {
+    return /^[a-z][a-z\d+.-]*:/i.test(uri) ? "" : uri;
+  }
 
   try {
     return new URL(uri).pathname || uri;
@@ -5211,6 +5213,8 @@ export default function ProfileEditScreen({
         firebaseToken={firebaseToken}
         initialLinkedinProfilePictureUrl={
           profile?.linkedinProfilePreview?.profilePictureUrl ||
+          profile?.linkedInProfilePictureUrl ||
+          profile?.linkedinProfilePictureUrl ||
           profile?.linkedin_profile_picture_url ||
           ""
         }
@@ -5243,6 +5247,12 @@ export default function ProfileEditScreen({
           profilePhotoDraft.profileImageCropRect ??
           profilePhoto.profileImageCropRect
         }
+        initialProfileImageNeedsEdit={Boolean(
+          profilePhotoDraft.pendingProfileImageUri,
+        )}
+        initialProfileImageUploaded={Boolean(
+          profilePhotoDraft.profileImageUploaded,
+        )}
         profileEditTheme
         openSourceMenuOnMount={openProfilePhotoSourceMenu}
         onBack={() => {
@@ -5297,6 +5307,9 @@ export default function ProfileEditScreen({
           profilePhotoDraft.profileImageCropRect ??
           profilePhoto.profileImageCropRect
         }
+        initialImageUploaded={Boolean(
+          profilePhotoDraft.profileImageUploaded,
+        )}
         profileEditTheme
         onBack={() => setProfilePhotoFlowStep("upload")}
         onContinue={(fields) => {
@@ -5948,6 +5961,16 @@ export default function ProfileEditScreen({
     setSaveError("");
 
     try {
+      const rawProfileImageUri = String(
+        profilePhoto.profileImageUri ?? "",
+      ).trim();
+      const profileImageUri = getProfileImagePath(rawProfileImageUri);
+      if (rawProfileImageUri && !profileImageUri) {
+        throw new Error(
+          "Please wait for the profile photo to finish uploading before saving.",
+        );
+      }
+
       const promptOptions =
         promptTitles.some(Boolean) || promptAnswers.some(Boolean)
           ? await getPrompts(firebaseToken).catch(() => [])
@@ -6376,9 +6399,6 @@ export default function ProfileEditScreen({
         );
       const equityHasRange = /specific equity range/i.test(
         String(equitySplitOption || ""),
-      );
-      const profileImageUri = getProfileImagePath(
-        profilePhoto.profileImageUri,
       );
       const payload = {
         headline: String(headline || "").trim(),
